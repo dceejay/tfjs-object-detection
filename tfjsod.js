@@ -17,6 +17,8 @@ module.exports = function (RED) {
         var cocoSsd = require('@tensorflow-models/coco-ssd');
 
         RED.nodes.createNode(this, n);
+        this.model = n.model;
+        this.modelUrlType = n.modelUrlType;
         this.scoreThreshold = n.scoreThreshold;
         this.maxDetections = n.maxDetections;
         this.passthru = n.passthru || "false";
@@ -34,16 +36,29 @@ module.exports = function (RED) {
         }
         loadFont();
 
-        async function loadModel() {
-            if (node.modelUrl === "local") {
+        async function loadModelCocoSsdMobilenetV2() {
+            if (node.modelUrlType === "local") {
                 node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"coco/model.json";
             }
             model = await cocoSsd.load({modelUrl: node.modelUrl});
             node.ready = true;
             node.status({fill:'green', shape:'dot', text:'Model ready'});
         }
+        
         node.status({fill:'yellow', shape:'ring', text:'Loading model...'});
-        loadModel();
+        
+        // Initialize the model
+        switch(node.model) {
+            case "coco_ssd_mobilenet_v2":
+                loadModelCocoSsdMobilenetV2();
+                break;
+            case "coco_ssd_mobilenet_v2_coral":
+            
+                break;
+            case "yolo_ssd_v5":
+            
+                break;
+        }
 
         async function getImage(m) {
             fetch(m.payload)
@@ -52,7 +67,7 @@ module.exports = function (RED) {
                 .then(function() {reco(m) });
         }
 
-        async function reco(m) {
+        async function recognizeCocoSsdMobilenetV2(m) {
             var jimg;
 
             if (node.passthru === "bbox") { jimg = jpeg.decode(m.payload); }
@@ -111,7 +126,19 @@ module.exports = function (RED) {
                         }
                         else { msg.payload = fs.readFileSync(msg.payload); }
                     }
-                    reco(msg);
+                    
+                    // Execute the selected object detection model
+                    switch(node.model) {
+                        case "coco_ssd_mobilenet_v2":
+                            recognizeCocoSsdMobilenetV2(msg);
+                            break;
+                        case "coco_ssd_mobilenet_v2_coral":
+                        
+                            break;
+                        case "yolo_ssd_v5":
+                        
+                            break;
+                    }
                 }
             } catch (error) {
                 node.error(error, msg);

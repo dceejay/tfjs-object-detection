@@ -1,0 +1,92 @@
+<script type="text/html" data-template-name="tensorflowObjDet">
+    <div class="form-row">
+        <label for="node-input-scoreThreshold"><i class="fa fa-signal"></i> Threshold</label>
+        <input type="text" id="node-input-scoreThreshold" placeholder="e.g. 0 - 1">
+    </div>
+    <div class="form-row">
+        <label for="node-input-modelUrl"><i class="fa fa-globe"></i> Model Url</label>
+        <input type="text" id="node-input-modelUrl" placeholder="leave blank to load from internet">
+    </div>
+    <div class="form-row">
+        <label for="node-input-passthru"><i class="fa fa-picture-o"></i> Passthru</label>
+        <select type="text" id="node-input-passthru" style="width:70%;">
+            <option value="false">Nothing</option>
+            <option value="true">Original Image</option>
+            <option value="bbox">Annotated Image</option>
+        </select>
+    </div>
+    <div class="form-row" id="node-bbox-colour">
+        <label for="node-input-lineColour"><i class="fa fa-paint-brush "></i> Box colour</label>
+        <input type="text" id="node-input-lineColour" placeholder="HTML5 colour or #rrggbb">
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="tensorflowObjDet">
+   <p>A <a href="https://www.tensorflow.org/js" target = "_new">TensorFlow.js</a> node to run Tfjs simple object recognition.</p>
+   <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">buffer | string</span></dt>
+        <dd>A binary buffer of a jpeg image, or string of a filename to load.</dd>
+        <dt>scoreThreshold <span class="property-type">number</span></dt>
+        <dd>Minimum threshold for a valid detection (0 - 1)</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">array</span></dt>
+        <dd>an array of detected objects, containing :
+        <ul><li><code>bbox</code> array, [x,y,width,height]</li>
+            <li><code>class</code> string, detected object class</li>
+            <li><code>score</code> number, 0 -> 1.</li>
+        </ul></dd>
+        <dt>classes <span class="property-type">object</span></dt>
+        <dd>an object with each class and their counts, e.g. <code>{dog:3,cat:1}</code>.</dd>
+        <dt>shape <span class="property-type">array[3]</span></dt>
+        <dd>dimensions of the input image, [x,y,depth].</dd>
+        <dt>scoreThreshold <span class="property-type">number</span></dt>
+        <dd>the scoreThreshold value used in this detection.</dd>
+        <dt>image <span class="property-type">buffer</span></dt>
+        <dd>(optional) either the original image, or
+        the image annotated with detected bounding boxes.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>The configured scoreThreshold can be overridden dynamically
+        by setting the <code>msg.scoreThreshold</code> property.</p>
+</script>
+
+<script type="text/javascript">
+    RED.nodes.registerType('tensorflowObjDet', {
+        category: 'analysis-function',
+        defaults: {
+            name: { value: "" },
+            modelUrl: { value: (location.origin||"http://localhost:1880")+RED.settings.httpNodeRoot+"coco/model.json" },
+            scoreThreshold: { value: 0.5 },
+            passthru: { value: "false" },
+            lineColour: { value: "magenta" }
+        },
+        inputs: 1,
+        outputs: 1,
+        paletteLabel: "tf object detect",
+        color: "#ED782F",
+        icon: "tfjs.png",
+        label: function() {
+            return this.name || "tf object detect";
+        },
+        oneditprepare: function() {
+            if (this.lineColour === undefined) {
+                $("#node-input-lineColour").val("magenta");
+            }
+            $("#node-input-passthru").change( function() {
+                if ($("#node-input-passthru").val() === "bbox") {
+                    $("#node-bbox-colour").show();
+                }
+                else {
+                    $("#node-bbox-colour").hide();
+                }
+            });
+        }
+    });
+</script>

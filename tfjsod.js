@@ -39,7 +39,7 @@ module.exports = function (RED) {
             // Start a new counter
             node.startTime = process.hrtime();
             
-            return duration;
+            return Math.round(duration);
         }
 
         async function loadFont() {
@@ -216,9 +216,12 @@ module.exports = function (RED) {
                     ctx.rect(msg.payload[k].bbox[0], msg.payload[k].bbox[1], msg.payload[k].bbox[2], msg.payload[k].bbox[3]);
                     ctx.stroke();
                 }
+
+                msg.executionTimes.drawing = getDuration();
+
                 msg.image = jpeg.encode(pimg,70).data;
                 
-                msg.executionTimes.drawing = getDuration();
+                msg.executionTimes.encoding = getDuration();
             }
 
             node.send(msg);

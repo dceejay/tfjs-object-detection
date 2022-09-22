@@ -30,6 +30,17 @@ module.exports = function (RED) {
 
         RED.httpNode.use(compression());
         RED.httpNode.use('/coco', express.static(__dirname + '/models/coco-ssd'));
+        
+        function getDuration() {
+            // Calculate the execution time (in milliseconds)
+            var stopTime = process.hrtime(node.startTime);
+            var duration = (stopTime[0] * 1000000000 + stopTime[1]) / 1000000;
+            
+            // Start a new counter
+            node.startTime = process.hrtime();
+            
+            return duration;
+        }
 
         async function loadFont() {
             node.fnt = pureimage.registerFont(path.join(__dirname,'./SourceSansPro-Regular.ttf'),'Source Sans Pro');
@@ -74,28 +85,33 @@ module.exports = function (RED) {
         
         loadModel();
 
-        async function getImage(m) {
-            fetch(m.payload)
+        async function getImage(msg) {
+            fetch(msg.payload)
                 .then(r => r.buffer())
-                .then(buf => m.payload = buf)
-                .then(function() {handleMsg(m) });
+                .then(buf => msg.payload = buf)
+                .then(function() {handleMsg(msg) });
         }
 
-        async function handleMsg(m) {
-            if (node.passthru === "true") { m.image = m.payload; }
+        async function handleMsg(msg) {
+            if (node.passthru === "true") { msg.image = msg.payload; }
+            
+            node.startTime = process.hrtime();
+            msg.executionTimes = {};
             
             // Decode the image and convert it to a tensor (in this case it will become 3D tensors based on the encoded bytes). 
             // The tfjs image decoding supports BMP, GIF, JPEG and PNG.
-            var imageTensor = tf.node.decodeImage(m.payload);
+            var imageTensor = tf.node.decodeImage(msg.payload);
+            
+            msg.executionTimes.decoding = getDuration();
 
-            m.maxDetections = m.maxDetections || node.maxDetections || 40;
+            msg.maxDetections = msg.maxDetections || node.maxDetections || 40;
             
             switch(node.model) {
                 case "coco_ssd_mobilenet_v2":
                     // The tfjs models work out-of-the-box since all Tensor handling is done inside the tfjs models.
                     // This in contradiction to the TfLite model below, in which case this node needs to do all input/output processing on its own...
                     // The resulting bounding boxes will have format [x_min, y_min, width, height].
-                    m.payload = await model.detect(imageTensor, m.maxDetections);
+                    msg.payload = await model.detect(imageTensor, msg.maxDetections);
                     break;
                 case "coco_ssd_mobilenet_v2_coral":
                     var resizedImageWidth = 300;
@@ -131,7 +147,7 @@ module.exports = function (RED) {
                     var imageHeight = imageTensor.shape[0];
                     var imageWidth = imageTensor.shape[1];
                     
-                    m.payload = [];
+                    msg.payload = [];
 
                     for(var i = 0; i < objectCount; i++) {
                         var score = scores[i];
@@ -149,7 +165,7 @@ module.exports = function (RED) {
                             var x2 = parseInt(Math.min(imageWidth, normalizedBbox[3] * imageWidth));
                             var y2 = parseInt(Math.min(imageHeight, normalizedBbox[2] * imageHeight));
 
-                            m.payload.push({
+                            msg.payload.push({
                                 class: node.labels[clazz],
                                 bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
                                 score: scores[i] * 100
@@ -161,19 +177,21 @@ module.exports = function (RED) {
                 
                     break;
             }
+            
+            msg.executionTimes.detection = getDuration();
 
-            m.shape = imageTensor.shape;
-            m.classes = {};
-            m.scoreThreshold = m.scoreThreshold || node.scoreThreshold || 0.5;
+            msg.shape = imageTensor.shape;
+            msg.classes = {};
+            msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
 
             // TODO add filtering based on minimum and maximum bbox size.
-            for (var i=0; i<m.payload.length; i++) {
-                if (m.payload[i].score < m.scoreThreshold) {
-                    m.payload.splice(i,1);
+            for (var i=0; i<msg.payload.length; i++) {
+                if (msg.payload[i].score < msg.scoreThreshold) {
+                    msg.payload.splice(i,1);
                     i = i - 1;
                 }
-                if (m.payload[i].hasOwnProperty("class")) {
-                    m.classes[m.payload[i].class] = (m.classes[m.payload[i].class] || 0 ) + 1;
+                if (msg.payload[i].hasOwnProperty("class")) {
+                    msg.classes[msg.payload[i].class] = (msg.classes[msg.payload[i].class] || 0 ) + 1;
                 }
             }
 
@@ -183,25 +201,27 @@ module.exports = function (RED) {
             if (node.passthru === "bbox") {
                 var jimg;
 
-                if (node.passthru === "bbox") { jimg = jpeg.decode(m.image); }
+                if (node.passthru === "bbox") { jimg = jpeg.decode(msg.image); }
                 var pimg = pureimage.make(jimg.width,jimg.height);
                 var ctx = pimg.getContext('2d');
                 var scale = parseInt((jimg.width + jimg.height) / 500 + 0.5);
                 ctx.bitmap.data = jimg.data;
-                for (var k=0; k<m.payload.length; k++) {
+                for (var k=0; k<msg.payload.length; k++) {
                     ctx.fillStyle = node.lineColour;
                     ctx.strokeStyle = node.lineColour;
                     ctx.font = scale*8+"pt 'Source Sans Pro'";
-                    ctx.fillText(m.payload[k].class, m.payload[k].bbox[0] + 4, m.payload[k].bbox[1] - 4)
+                    ctx.fillText(msg.payload[k].class, msg.payload[k].bbox[0] + 4, msg.payload[k].bbox[1] - 4)
                     ctx.lineWidth = scale;
                     ctx.lineJoin = 'bevel';
-                    ctx.rect(m.payload[k].bbox[0], m.payload[k].bbox[1], m.payload[k].bbox[2], m.payload[k].bbox[3]);
+                    ctx.rect(msg.payload[k].bbox[0], msg.payload[k].bbox[1], msg.payload[k].bbox[2], msg.payload[k].bbox[3]);
                     ctx.stroke();
                 }
-                m.image = jpeg.encode(pimg,70).data;
+                msg.image = jpeg.encode(pimg,70).data;
+                
+                msg.executionTimes.drawing = getDuration();
             }
 
-            node.send(m);
+            node.send(msg);
         }
 
         node.on('input', function (msg) {

@@ -59,6 +59,7 @@ module.exports = function (RED) {
                     node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/coco-ssd/model.json";
                 }
                 model = await cocoSsd.load({modelUrl: node.modelUrl});
+                console.log("LOADED CoCo");
                 break;
 
             case "coco_ssd_mobilenet_v2_coral":
@@ -73,6 +74,7 @@ module.exports = function (RED) {
                 // Use a Coral delegate, which makes use of the EdgeTPU Runtime Library (libedgetpu)..
                 // When no delegate is specified, the model would be processed by the CPU.
                 model = await tflite.loadTFLiteModel(node.modelUrl, {delegates: [new CoralDelegate()]});
+                console.log("LOADED TfLite");
                 break;
 
             case "yolo_ssd_v5":
@@ -234,16 +236,15 @@ module.exports = function (RED) {
                     // res.forEach(t => t.print());
                     makeBoxes(boxes_data, scores_data, classes_data, rc_data[0]);
                 });
-                console.log("PAY",msg.payload.length,msg.payload)
                 break;
             }
 
             msg.executionTimes.detection = getDuration();
-
             msg.shape = imageTensor.shape;
             msg.classes = {};
             msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
 
+            console.log("PAY1",msg.payload.length,msg.payload)
             // TODO add filtering based on minimum and maximum bbox size.
 
             // sort the array so we get highest scores first in case we trim the lenght
@@ -257,6 +258,8 @@ module.exports = function (RED) {
                     msg.classes[msg.payload[j].class] = (msg.classes[msg.payload[j].class] || 0 ) + 1;
                 }
             }
+
+            // console.log("PAY2",msg.payload.length,msg.payload)
 
             tf.dispose(imageTensor);
 

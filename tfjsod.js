@@ -10,7 +10,6 @@ module.exports = function (RED) {
         var tf = require('@tensorflow/tfjs-node');
         var cocoSsd = require('@tensorflow-models/coco-ssd');
 
-
         /* suggestion from https://github.com/tensorflow/tfjs/issues/2029 */
         const nodeFetch = require('node-fetch'); // <<--- ADD
         global.fetch = nodeFetch; // <<--- ADD
@@ -49,6 +48,9 @@ module.exports = function (RED) {
 
         async function loadModel() {
             node.status({fill:'yellow', shape:'ring', text:'Loading model...'});
+            // TODO add the labels file (https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt) to Dave's repository instead of the labels array below??
+                //labels = fs.readFileSync('./model/labels.txt', 'utf8').split('\n');
+            node.labels = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'n/a', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'n/a', 'backpack', 'umbrella', 'n/a', 'n/a', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'n/a', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'n/a', 'dining table', 'n/a', 'n/a', 'toilet', 'n/a', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'n/a', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'];
 
             // Initialize the model
             switch(node.model) {
@@ -65,21 +67,22 @@ module.exports = function (RED) {
                 var {CoralDelegate} = require('coral-tflite-delegate');
                 if (node.modelUrlType === "local") {
                     // Coral edge TPU models available at https://coral.ai/models/
-                    // TODO add the file to Dave's repository
-                    node.modelUrl = "https://raw.githubusercontent.com/google-coral/test_data/master/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite";
+                    //node.modelUrl = "https://raw.githubusercontent.com/google-coral/test_data/master/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite";
+                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/coco-coral/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite"
                 }
-
                 // Use a Coral delegate, which makes use of the EdgeTPU Runtime Library (libedgetpu)..
                 // When no delegate is specified, the model would be processed by the CPU.
-                const options = {delegates: [new CoralDelegate()]};
-                model = await tflite.loadTFLiteModel(node.modelUrl, options);
-                // TODO add the labels file (https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt) to Dave's repository instead of the labels array below??
-                //labels = fs.readFileSync('./model/labels.txt', 'utf8').split('\n');
-                node.labels = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'n/a', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'n/a', 'backpack', 'umbrella', 'n/a', 'n/a', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'n/a', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'n/a', 'dining table', 'n/a', 'n/a', 'toilet', 'n/a', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'n/a', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'];
+                model = await tflite.loadTFLiteModel(node.modelUrl, {delegates: [new CoralDelegate()]});
                 break;
 
             case "yolo_ssd_v5":
-
+                if (node.modelUrlType === "local") {
+                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/yolo5n/model.json";
+                }
+                else if (node.modelUrl === undefined) { node.modelUrl = DEFAULT_MODEL_LOCATION; }
+                console.log("Yolo URL",node.modelUrl)
+                model = await tf.loadGraphModel(node.modelUrl);
+                console.log("LOADED Yolo");
                 break;
             }
 
@@ -101,14 +104,38 @@ module.exports = function (RED) {
 
             node.startTime = process.hrtime();
             msg.executionTimes = {};
+            msg.executionTimes.decoding = getDuration();
+            msg.maxDetections = msg.maxDetections || node.maxDetections || 40;
 
             // Decode the image and convert it to a tensor (in this case it will become 3D tensors based on the encoded bytes).
             // The tfjs image decoding supports BMP, GIF, JPEG and PNG.
             var imageTensor = tf.node.decodeImage(msg.payload);
 
-            msg.executionTimes.decoding = getDuration();
+            var modelWidth, modelHeight, input;
 
-            msg.maxDetections = msg.maxDetections || node.maxDetections || 40;
+            var makeBoxes = function(boxes, scores, classes, count) {
+                var imageHeight = imageTensor.shape[0];
+                var imageWidth = imageTensor.shape[1];
+                for (var i = 0; i < count; i++) {
+                    // var score = scores[i];
+                    // if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
+                    var clazz = classes[i];
+
+                    // Denormalization can be executed by multiplying with the image width and height.
+                    // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
+                    // The prediction can give coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
+                    var x1 = parseInt(Math.max(0, boxes[i*4+0] * imageWidth));
+                    var y1 = parseInt(Math.max(0, boxes[i*4+1] * imageHeight));
+                    var x2 = parseInt(Math.min(imageWidth, boxes[i*4+2] * imageWidth));
+                    var y2 = parseInt(Math.min(imageHeight, boxes[i*4+3] * imageHeight));
+
+                    msg.payload.push({
+                        class: node.labels[clazz],
+                        bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
+                        score: scores[i] * 100
+                    })
+                }
+            }
 
             switch(node.model) {
             case "coco_ssd_mobilenet_v2":
@@ -180,7 +207,29 @@ module.exports = function (RED) {
                 break;
 
             case "yolo_ssd_v5":
+                [modelWidth, modelHeight] = model.inputs[0].shape.slice(1, 3);
+                input = tf.tidy(() => {
+                    return tf.image
+                        .resizeBilinear(imageTensor, [modelWidth, modelHeight])
+                        .div(255.0)
+                        .expandDims(0);
+                });
 
+                msg.payload = [];
+                await model.executeAsync(input).then((res) => {
+                    const [boxes, scores, classes, rc] = res.slice(0, 4);
+                    const boxes_data = boxes.dataSync();
+                    const scores_data = scores.dataSync();
+                    const classes_data = classes.dataSync();
+                    const rc_data = rc.dataSync();
+                    // console.log("BD",boxes_data)
+                    // console.log("SD",scores_data)
+                    // console.log("CD",classes_data)
+                    // console.log("RC",rc_data[0])
+                    // res.forEach(t => t.print());
+                    makeBoxes(boxes_data, scores_data, classes_data, rc_data[0]);
+                });
+                // console.log("PAY",msg.payload)
                 break;
             }
 
@@ -224,9 +273,7 @@ module.exports = function (RED) {
                 }
 
                 msg.executionTimes.drawing = getDuration();
-
                 msg.image = jpeg.encode(pimg,70).data;
-
                 msg.executionTimes.encoding = getDuration();
             }
 

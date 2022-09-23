@@ -34,7 +34,6 @@
         "url": "http://nodered.org"
     },
     "scripts": {
-        "postinstall": "npm rebuild @tensorflow/tfjs-node --build-from-source"
     },
     "engines": {
         "node": ">=14"

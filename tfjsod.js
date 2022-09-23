@@ -299,7 +299,7 @@ module.exports = function (RED) {
                         }
                         else { msg.payload = fs.readFileSync(msg.payload); }
                     }
-                    // Allow repalcing the label dynamically
+                    // Allow replacing the labels array dynamically - either as an array or a csv string
                     // Also if any are missing from the array then don't report/draw boxes later
                     if (Array.isArray(msg.labels)) { node.labels = msg.labels; }
                     if (typeof msg.labels === "string") { node.labels = msg.labels.split(','); }

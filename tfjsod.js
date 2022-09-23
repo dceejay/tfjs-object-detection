@@ -125,18 +125,20 @@ module.exports = function (RED) {
                 for (var i = 0; i < count; i++) {
                     // var score = scores[i];
                     // if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
-                    var clazz = classes[i];
+                    const clazz = node.labels[classes[i]];
+                    // only report those that we have in the labels array.
+                    if (clazz) {
+                        var x1 = parseInt(Math.max(0, boxes[i*4+0] * imageWidth));
+                        var y1 = parseInt(Math.max(0, boxes[i*4+1] * imageHeight));
+                        var x2 = parseInt(Math.min(imageWidth, boxes[i*4+2] * imageWidth));
+                        var y2 = parseInt(Math.min(imageHeight, boxes[i*4+3] * imageHeight));
 
-                    var x1 = parseInt(Math.max(0, boxes[i*4+0] * imageWidth));
-                    var y1 = parseInt(Math.max(0, boxes[i*4+1] * imageHeight));
-                    var x2 = parseInt(Math.min(imageWidth, boxes[i*4+2] * imageWidth));
-                    var y2 = parseInt(Math.min(imageHeight, boxes[i*4+3] * imageHeight));
-
-                    msg.payload.push({
-                        class: node.labels[clazz],
-                        bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
-                        score: scores[i] * 100
-                    })
+                        msg.payload.push({
+                            class: clazz,
+                            bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
+                            score: scores[i] * 100
+                        })
+                    }
                 }
             }
 
@@ -297,8 +299,13 @@ module.exports = function (RED) {
                         }
                         else { msg.payload = fs.readFileSync(msg.payload); }
                     }
-
-                    handleMsg(msg);
+                    // Allow repalcing the label dynamically
+                    // Also if any are missing from the array then don't report/draw boxes later
+                    if (Array.isArray(msg.labels)) { node.labels = msg.labels; }
+                    if (typeof msg.labels === "string") { node.labels = msg.labels.split(','); }
+                    if (msg.payload) {
+                        handleMsg(msg);
+                    }
                 }
             } catch (error) {
                 node.error(error, msg);

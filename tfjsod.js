@@ -21,7 +21,7 @@ module.exports = function (RED) {
         this.scoreThreshold = n.scoreThreshold;
         this.maxDetections = n.maxDetections;
         this.passthru = n.passthru || "false";
-        this.modelUrl = n.modelUrl || undefined; // "http://localhost:1880/coco/model.json"
+        this.modelUrl = n.modelUrl || undefined; // "http://localhost:1880/models/coco-ssd/model.json"
         this.lineColour = n.lineColour || "magenta";
         var node = this;
         var model;
@@ -77,7 +77,7 @@ module.exports = function (RED) {
 
             case "yolo_ssd_v5":
                 if (node.modelUrlType === "local") {
-                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/yolo5n/model.json";
+                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/yolo5s/model.json";
                 }
                 else if (node.modelUrl === undefined) { node.modelUrl = DEFAULT_MODEL_LOCATION; }
                 console.log("Yolo URL",node.modelUrl)
@@ -136,7 +136,7 @@ module.exports = function (RED) {
                         msg.payload.push({
                             class: clazz,
                             bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
-                            score: scores[i] * 100
+                            score: scores[i]
                         })
                     }
                 }
@@ -205,7 +205,7 @@ module.exports = function (RED) {
                         msg.payload.push({
                             class: node.labels[clazz],
                             bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
-                            score: scores[i] * 100
+                            score: scores[i]
                         })
                     }
                 }
@@ -234,7 +234,7 @@ module.exports = function (RED) {
                     // res.forEach(t => t.print());
                     makeBoxes(boxes_data, scores_data, classes_data, rc_data[0]);
                 });
-                console.log("PAY",msg.payload)
+                console.log("PAY",msg.payload.length,msg.payload)
                 break;
             }
 
@@ -245,13 +245,16 @@ module.exports = function (RED) {
             msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
 
             // TODO add filtering based on minimum and maximum bbox size.
-            for (var i=0; i<msg.payload.length; i++) {
-                if (msg.payload[i].score < msg.scoreThreshold) {
-                    msg.payload.splice(i,1);
-                    i = i - 1;
+
+            // sort the array so we get highest scores first in case we trim the lenght
+            msg.payload.sort((a, b) => (a.score < b.score) ? 1 : -1)
+            for (var j=0; j < Math.min(msg.payload.length, msg.maxDetections); j++) {
+                if (msg.payload[j].score < msg.scoreThreshold) {
+                    msg.payload.splice(j,1);
+                    j = j - 1;
                 }
-                if (msg.payload[i].hasOwnProperty("class")) {
-                    msg.classes[msg.payload[i].class] = (msg.classes[msg.payload[i].class] || 0 ) + 1;
+                if (msg.payload[j].hasOwnProperty("class")) {
+                    msg.classes[msg.payload[j].class] = (msg.classes[msg.payload[j].class] || 0 ) + 1;
                 }
             }
 

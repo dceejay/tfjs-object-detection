@@ -49,7 +49,7 @@ module.exports = function (RED) {
         async function loadModel() {
             node.status({fill:'yellow', shape:'ring', text:'Loading model...'});
             // TODO add the labels file (https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt) to Dave's repository instead of the labels array below??
-                //labels = fs.readFileSync('./model/labels.txt', 'utf8').split('\n');
+            //labels = fs.readFileSync('./model/labels.txt', 'utf8').split('\n');
             node.labels = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'n/a', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'n/a', 'backpack', 'umbrella', 'n/a', 'n/a', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'n/a', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'n/a', 'dining table', 'n/a', 'n/a', 'toilet', 'n/a', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'n/a', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'];
 
             // Initialize the model
@@ -109,7 +109,13 @@ module.exports = function (RED) {
 
             // Decode the image and convert it to a tensor (in this case it will become 3D tensors based on the encoded bytes).
             // The tfjs image decoding supports BMP, GIF, JPEG and PNG.
-            var imageTensor = tf.node.decodeImage(msg.payload);
+            try {
+                var imageTensor = tf.node.decodeImage(msg.payload);
+            }
+            catch(e) {
+                node.error("Payload does not seem to be a valid image buffer.",msg)
+                return;
+            }
 
             var modelWidth, modelHeight, input;
 
@@ -121,9 +127,6 @@ module.exports = function (RED) {
                     // if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
                     var clazz = classes[i];
 
-                    // Denormalization can be executed by multiplying with the image width and height.
-                    // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
-                    // The prediction can give coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
                     var x1 = parseInt(Math.max(0, boxes[i*4+0] * imageWidth));
                     var y1 = parseInt(Math.max(0, boxes[i*4+1] * imageHeight));
                     var x2 = parseInt(Math.min(imageWidth, boxes[i*4+2] * imageWidth));
@@ -229,7 +232,7 @@ module.exports = function (RED) {
                     // res.forEach(t => t.print());
                     makeBoxes(boxes_data, scores_data, classes_data, rc_data[0]);
                 });
-                // console.log("PAY",msg.payload)
+                console.log("PAY",msg.payload)
                 break;
             }
 

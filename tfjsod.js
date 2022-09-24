@@ -64,8 +64,15 @@ module.exports = function (RED) {
 
             case "coco_ssd_mobilenet_v2_coral":
                 // This is not a great fix for thing not working on Mac - but at least keeps the other options working
-                var tflite = require('tfjs-tflite-node');
-                var {CoralDelegate} = require('coral-tflite-delegate');
+                try {
+                    var tflite = require('tfjs-tflite-node');
+                    var {CoralDelegate} = require('coral-tflite-delegate');
+                }
+                catch(e) {
+                    node.status({fill:'red', shape:'ring', text:'Failed to load TFLite library'});
+                    node.error("Failed to load TFLite library",e);
+                    return;
+                }
                 if (node.modelUrlType === "local") {
                     // Coral edge TPU models available at https://coral.ai/models/
                     //node.modelUrl = "https://raw.githubusercontent.com/google-coral/test_data/master/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite";
@@ -73,8 +80,15 @@ module.exports = function (RED) {
                 }
                 // Use a Coral delegate, which makes use of the EdgeTPU Runtime Library (libedgetpu)..
                 // When no delegate is specified, the model would be processed by the CPU.
-                model = await tflite.loadTFLiteModel(node.modelUrl, {delegates: [new CoralDelegate()]});
-                console.log("LOADED TfLite");
+                try {
+                    model = await tflite.loadTFLiteModel(node.modelUrl, {delegates: [new CoralDelegate()]});
+                    console.log("LOADED TFLite");
+                }
+                catch(e) {
+                    node.status({fill:'red', shape:'ring', text:'Failed to load model'});
+                    node.error("Can't load TFLite model",e);
+                    return;
+                }
                 break;
 
             case "yolo_ssd_v5":

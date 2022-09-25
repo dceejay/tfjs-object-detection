@@ -120,7 +120,6 @@ module.exports = function (RED) {
 
             node.startTime = process.hrtime();
             msg.executionTimes = {};
-            msg.executionTimes.decoding = getDuration();
             msg.maxDetections = msg.maxDetections || node.maxDetections || 40;
 
             // Decode the image and convert it to a tensor (in this case it will become 3D tensors based on the encoded bytes).
@@ -132,6 +131,8 @@ module.exports = function (RED) {
                 node.error("Payload does not seem to be a valid image buffer.",msg)
                 return;
             }
+            
+            msg.executionTimes.decoding = getDuration();
 
             var modelWidth, modelHeight, input;
 
@@ -253,6 +254,7 @@ module.exports = function (RED) {
                 break;
             }
 
+            msg.model = node.model;
             msg.executionTimes.detection = getDuration();
             msg.shape = imageTensor.shape;
             msg.classes = {};

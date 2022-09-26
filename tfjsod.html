@@ -1,12 +1,13 @@
 <script type="text/html" data-template-name="tensorflowObjDet">
     <div class="form-row">
-        <label for="node-input-model"><i class="fa fa-calculator "></i> Model</label>
+        <label for="node-input-model"><i class="fa fa-calculator "></i> Network</label>
         <select type="text" id="node-input-model" style="width:70%;">
-            <option value="coco_ssd_mobilenet_v2">CoCo Ssd MobileNet v2</option>
-            <option value="coco_ssd_mobilenet_v2_coral">Coco Ssd MobileNet v2 (Coral)</option>
-            <option value="yolo_ssd_v5">Yolo v5</option>
+            <option value="coco_ssd_mobilenet_v2">MobileNet v2 - CoCo SSD</option>
+            <option value="coco_ssd_mobilenet_v2_coral">MobileNet v2 (Coral) - CoCo SSD</option>
+            <option value="yolo_ssd_v5">Yolo v5 - CoCo SSD</option>
+            <option value="yolo_ssd_v5_custom">Yolo v5 custom model - CoCo SSD</option>
         </select>
-    </div>    
+    </div>
     <div class="form-row">
         <label for="node-input-scoreThreshold"><i class="fa fa-signal"></i> Threshold</label>
         <input type="number" id="node-input-scoreThreshold" placeholder="e.g. 0 - 1" min="0" max="1" step="0.1">
@@ -101,7 +102,7 @@
                 types:['msg', localModelOption]
             });
             $("#node-input-modelUrl").typedInput('type',node.modelUrlType);
-            
+
             if (this.lineColour === undefined) {
                 $("#node-input-lineColour").val("magenta");
             }

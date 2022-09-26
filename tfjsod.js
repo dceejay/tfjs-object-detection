@@ -21,10 +21,12 @@ module.exports = function (RED) {
         this.scoreThreshold = n.scoreThreshold;
         this.maxDetections = n.maxDetections;
         this.passthru = n.passthru || "false";
-        this.modelUrl = n.modelUrl || undefined; // "http://localhost:1880/models/coco-ssd/model.json"
+        this.modelUrl = n.modelUrl || undefined;
         this.lineColour = n.lineColour || "magenta";
+        this.colors = [this.lineColour];
         var node = this;
         var model;
+        const yoloModel = "yolo5s"; // use yolo5s or yolo5n
 
         RED.httpNode.use(compression());
         RED.httpNode.use('/models', express.static(__dirname + '/models'));
@@ -50,7 +52,6 @@ module.exports = function (RED) {
             node.status({fill:'yellow', shape:'ring', text:'Loading model...'});
             // TODO add the labels file (https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt) to Dave's repository instead of the labels array below??
             //labels = fs.readFileSync('./model/labels.txt', 'utf8').split('\n');
-            node.labels = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'n/a', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'n/a', 'backpack', 'umbrella', 'n/a', 'n/a', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'n/a', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'n/a', 'dining table', 'n/a', 'n/a', 'toilet', 'n/a', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'n/a', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'];
 
             // Initialize the model
             switch(node.model) {
@@ -59,7 +60,9 @@ module.exports = function (RED) {
                     node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/coco-ssd/model.json";
                 }
                 model = await cocoSsd.load({modelUrl: node.modelUrl});
-                console.log("LOADED CoCo");
+                node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",")
+                node.log("Loaded Mobilenet");
+                node.status({fill:'green', shape:'dot', text:'MobileNet v2 ready'});
                 break;
 
             case "coco_ssd_mobilenet_v2_coral":
@@ -75,35 +78,63 @@ module.exports = function (RED) {
                 }
                 if (node.modelUrlType === "local") {
                     // Coral edge TPU models available at https://coral.ai/models/
-                    //node.modelUrl = "https://raw.githubusercontent.com/google-coral/test_data/master/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite";
                     node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/coco-coral/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite"
+                }
+                if (node.modelUrl === undefined) {
+                    node.modelUrl = "https://raw.githubusercontent.com/google-coral/test_data/master/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite";
                 }
                 // Use a Coral delegate, which makes use of the EdgeTPU Runtime Library (libedgetpu)..
                 // When no delegate is specified, the model would be processed by the CPU.
                 try {
                     model = await tflite.loadTFLiteModel(node.modelUrl, {delegates: [new CoralDelegate()]});
-                    console.log("LOADED TFLite");
+                    node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,n/a,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,n/a,backpack,umbrella,n/a,n/a,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,n/a,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,n/a,dining table,n/a,n/a,toilet,n/a,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,n/a,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",")
+                    node.log("Loaded TFLite");
                 }
                 catch(e) {
                     node.status({fill:'red', shape:'ring', text:'Failed to load model'});
                     node.error("Can't load TFLite model",e);
                     return;
                 }
+                node.status({fill:'green', shape:'dot', text:'MobileNet(Coral) ready'});
                 break;
 
             case "yolo_ssd_v5":
                 if (node.modelUrlType === "local") {
-                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/yolo5s/model.json";
+                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/"+yoloModel+"/model.json";
                 }
-                else if (node.modelUrl === undefined) { node.modelUrl = DEFAULT_MODEL_LOCATION; }
-                console.log("Yolo URL",node.modelUrl)
+                if (node.modelUrl === undefined) {
+                    node.modelUrl = "https://raw.githubusercontent.com/Hyuto/yolov5-tfjs/master/public/yolov5n_web_model/model.json";
+                }
                 model = await tf.loadGraphModel(node.modelUrl);
-                console.log("LOADED Yolo");
+                node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",")
+                node.log("Loaded Yolo model");
+                node.status({fill:'green', shape:'dot', text:'Yolov5 ready'});
+                break;
+
+            case "yolo_ssd_v5_custom":
+                if (node.modelUrlType === "local") {
+                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/custom/model.json";
+                }
+                node.log("Yolo Custom URL "+node.modelUrl)
+                model = await tf.loadGraphModel(node.modelUrl);
+                node.log("Loaded Custom model");
+                node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",");
+                var response = await fetch("http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/custom/labels.txt");
+                if (response.status === 200) {
+                    node.labels = (await response.text()).replace(/[\r\n]/gm, ',').replace(/,,/gm, ',').split(',');
+                    node.log("Loaded Custom labels "+node.labels)
+                }
+                response = await fetch("http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/custom/colors.txt");
+                if (response.status === 200) {
+                    node.colors = (await response.text()).replace(/[\r\n]/gm, ',').replace(/,,/gm, ',').split(',');
+                    node.log("Loaded Custom colours "+node.colors)
+                }
+                node.status({fill:'green', shape:'dot', text:'Custom Yolov5 ready'});
                 break;
             }
 
             node.ready = true;
-            node.status({fill:'green', shape:'dot', text:'Model ready'});
+
         }
 
         loadModel();
@@ -228,6 +259,7 @@ module.exports = function (RED) {
                 break;
 
             case "yolo_ssd_v5":
+            case "yolo_ssd_v5_custom":
                 [modelWidth, modelHeight] = model.inputs[0].shape.slice(1, 3);
                 input = tf.tidy(() => {
                     return tf.image
@@ -258,7 +290,7 @@ module.exports = function (RED) {
             msg.classes = {};
             msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
 
-            console.log("PAY1",msg.payload.length,msg.payload)
+            console.log("RESULTS",msg.payload.length,msg.payload)
             // TODO add filtering based on minimum and maximum bbox size.
 
             // sort the array so we get highest scores first in case we trim the lenght
@@ -268,12 +300,10 @@ module.exports = function (RED) {
                     msg.payload.splice(j,1);
                     j = j - 1;
                 }
-                if (msg.payload[j].hasOwnProperty("class")) {
+                if (msg.payload[j] && msg.payload[j].hasOwnProperty("class")) {
                     msg.classes[msg.payload[j].class] = (msg.classes[msg.payload[j].class] || 0 ) + 1;
                 }
             }
-
-            // console.log("PAY2",msg.payload.length,msg.payload)
 
             tf.dispose(imageTensor);
 
@@ -287,8 +317,10 @@ module.exports = function (RED) {
                 var scale = parseInt((jimg.width + jimg.height) / 500 + 0.5);
                 ctx.bitmap.data = jimg.data;
                 for (var k=0; k<msg.payload.length; k++) {
-                    ctx.fillStyle = node.lineColour;
-                    ctx.strokeStyle = node.lineColour;
+                    // lookup the index of the class to cross ref into colour table
+                    const col = node.colors[node.labels.indexOf(msg.payload[k].class)];
+                    ctx.fillStyle = col || node.lineColour;
+                    ctx.strokeStyle = col || node.lineColour;
                     ctx.font = scale*8+"pt 'Source Sans Pro'";
                     ctx.fillText(msg.payload[k].class, msg.payload[k].bbox[0] + 4, msg.payload[k].bbox[1] - 4)
                     ctx.lineWidth = scale;
@@ -323,6 +355,8 @@ module.exports = function (RED) {
                     // Also if any are missing from the array then don't report/draw boxes later
                     if (Array.isArray(msg.labels)) { node.labels = msg.labels; }
                     if (typeof msg.labels === "string") { node.labels = msg.labels.split(','); }
+                    if (Array.isArray(msg.colors)) { node.colors = msg.colors; }
+                    if (typeof msg.colors === "string") { node.colors = msg.colors.split(','); }
                     if (msg.payload) {
                         handleMsg(msg);
                     }

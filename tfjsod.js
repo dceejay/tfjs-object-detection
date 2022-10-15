@@ -248,6 +248,22 @@ module.exports = function (RED) {
 
             return propertyTensor.arraySync()[0];
         }
+        
+        // See https://github.com/tensorflow/tfjs/issues/6911#issuecomment-1271805344
+        function rgb2rgba(rgb) {
+            if (rgb.shape[2] === 4) {
+                return rgb;
+            }
+
+            if (rgb.shape[2] === 3) {
+                return tf.tidy(function() {
+                    const alpha = tf.fill([rgb.shape[0], rgb.shape[1], 1], rgb.dtype === 'int32' ? 255 : 1, rgb.dtype);
+                    return tf.concat([rgb, alpha], 2);
+                })
+            }
+
+            throw new Error('invalid shape');
+        }
 
         async function handleMsg(msg) {
             var resizedImageTensor;
@@ -486,8 +502,7 @@ module.exports = function (RED) {
                     // This is similar to the html canvas (see https://developer.mozilla.org/en-US/docs/Web/API/ImageData/data).
                     // So add an alpha channel to the image if it is missing.  This will be the case for decoded jpeg's, since jpeg has no transparency support.
                     // We have asked the Tensorflow team to add alpha channel support for jpeg (see https://github.com/tensorflow/tfjs/issues/6911).
-                    var alphaChannelTensor = tf.fill([imageHeight, imageWidth, 1], 255, 'int32');
-                    rgbaTensor = tf.concat([imageTensor, alphaChannelTensor], 2);
+                    rgbaTensor = rgb2rgba(imageTensor);
                 }
                 else {
                     // The image tensor contains RGBA (i.e. 4 channels), when it's shape is [height, width, 4]).
@@ -574,7 +589,7 @@ module.exports = function (RED) {
             msg.executionTimes.encoding = getDuration();
 
             // Cleanup all tensors, to avoid memory leakage
-            tf.dispose([annotatedImageTensor, alphaChannelTensor, rgbaTensor]);
+            tf.dispose([annotatedImageTensor, rgbaTensor]);
 
             tf.dispose(imageTensor);
 

@@ -20,12 +20,19 @@
         "node-red",
         "tensorflow",
         "tensorflowjs",
-        "tfjs"
+        "tfjs",
+        "object",
+        "detection",
+        "coral",
+        "tpu",
+        "yolo",
+        "tflite"
     ],
     "node-red": {
         "version": ">=1.0.0",
         "nodes": {
-            "tensorflowObjDet": "tfjsod.js"
+            "tensorflowObjDet": "tfjsod.js",
+            "tensorflowObjDetConfig": "tfjsod_config.js"
         }
     },
     "author": {

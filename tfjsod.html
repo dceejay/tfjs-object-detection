@@ -1,21 +1,18 @@
 <script type="text/html" data-template-name="tensorflowObjDet">
     <div class="form-row">
-        <label for="node-input-model"><i class="fa fa-calculator "></i> Network</label>
-        <select type="text" id="node-input-model" style="width:70%;">
-            <option value="coco_ssd_mobilenet_v2">MobileNet v2 - CoCo SSD</option>
-            <option value="coco_ssd_mobilenet_v2_coral">MobileNet v2 (Coral) - CoCo SSD</option>
-            <option value="yolo_ssd_v5">Yolo v5 - CoCo SSD</option>
-            <option value="yolo_ssd_v5_custom">Yolo v5 custom model - CoCo SSD</option>
-        </select>
+        <label for="node-input-tensorflowConfig"><i class="fa fa-cog"></i> Model</label>
+        <!-- Node-Red will replace this input element by a drop-down (with available Tfjs configurations) -->
+        <input type="text" id="node-input-tensorflowConfig">
     </div>
+    <div class="form-row">
+        <label>&nbsp;</label>
+        <button id="node-input-generateConfigNodes"><i class="fa fa-plus-circle"></i> Generate default config nodes</button>
+    </div>
+    <br>
     <div class="form-row">
         <label for="node-input-scoreThreshold"><i class="fa fa-signal"></i> Threshold</label>
         <input type="number" id="node-input-scoreThreshold" placeholder="e.g. 0 - 1" min="0" max="1" step="0.1">
     </div>
-    <div class="form-row">
-        <label for="node-input-modelUrl"><i class="fa fa-globe"></i> Model Url</label>
-        <input type="text" id="node-input-modelUrl" placeholder="leave blank to load from internet">
-        <input type="hidden" id="node-input-modelUrlType">
     </div>
     <div class="form-row">
         <label for="node-input-passthru"><i class="fa fa-picture-o"></i> Passthru</label>
@@ -25,9 +22,16 @@
             <option value="bbox">Annotated Image</option>
         </select>
     </div>
-    <div class="form-row" id="node-bbox-colour">
-        <label for="node-input-lineColour"><i class="fa fa-paint-brush "></i> Box colour</label>
-        <input type="color" id="node-input-lineColour" placeholder="HTML5 colour or #rrggbb">
+    <div class="form-row">
+        <label for="node-input-outputFormat"><i class="fa fa-picture-o"></i> Output format</label>
+        <select type="text" id="node-input-outputFormat" style="width:70%;">
+            <option value="raw">Raw</option>
+            <option value="jpg">JPEG</option>
+        </select>
+    </div>
+    <div class="form-row" id="node-bbox-color">
+        <label for="node-input-lineColor"><i class="fa fa-paint-brush "></i> Box color</label>
+        <input type="color" id="node-input-lineColor" placeholder="HTML5 color or #rrggbb">
     </div>
     <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
@@ -72,12 +76,11 @@
         category: 'analysis-function',
         defaults: {
             name: { value: "" },
-            model: { value: "coco_ssd_mobilenet_v2" },
-            modelUrl: { value: (location.origin||"http://localhost:1880")+RED.settings.httpNodeRoot+"coco/model.json" },
-            modelUrlType: { value: "local" },
+            tensorflowConfig: {value:"", type: "tensorflowObjDetConfig"},
             scoreThreshold: { value: 0.8 },
             passthru: { value: "false" },
-            lineColour: { value: "#FF00FF" } // Magenta
+            lineColor: { value: "#FF00FF" }, // Magenta
+            outputFormat: { value: "jpg" } 
         },
         inputs: 1,
         outputs: 1,
@@ -88,30 +91,132 @@
             return this.name || "tf object detect";
         },
         oneditprepare: function() {
-            // Custom typedefinition for 'local model'
-            var localModelOption = {
-                value: 'local',
-                label: 'Local Model',
-                hasValue: false
+            var node = this;
+
+            function createConfigNode(name, options) {
+                var id = RED.nodes.id();
+            
+                // Create a new config node
+                var newConfig = {
+                    id: id,
+                    _def: RED.nodes.getType("tensorflowObjDetConfig"),
+                    type: "tensorflowObjDetConfig",
+                    hasUsers: false, 
+                    users: [],
+                    name: name,
+                    label: function() { return this.name || name}
+                }
+
+                for(var optionName in options) {
+                    newConfig[optionName] = options[optionName];
+                }
+
+                RED.nodes.add(newConfig);
+                
+                return newConfig;
             }
+debugger
+            $("#node-input-generateConfigNodes").click(function () {
+                var defaultConfigNodes = [];
 
-            // Show the imageProperty value in a typedinput element (dropdown with only 'msg')
-            $("#node-input-modelUrl").typedInput({
-                default: 'msg',
-                typeField: $("#node-input-modelUrlType"),
-                types:['msg', localModelOption]
-            });
-            $("#node-input-modelUrl").typedInput('type',node.modelUrlType);
+                // The Tfjs model requires much less properties, because the model contains Js code that parses the output automatically
+                var labels1 = ["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"];
+                defaultConfigNodes.push(createConfigNode("Coco SSD Tfjs", {
+                    runtime: "tfjs",
+                    model: "models/coco-ssd/model.json",
+                    modelType: "path",
+                    labels: '["' + labels1.join('","') + '"]',
+                    labelsType: "json",
+                    colors: "[]",
+                    colorsType: "json"
+                }));
 
-            if (this.lineColour === undefined) {
-                $("#node-input-lineColour").val("magenta");
+                var labels2 = ["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","n/a","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","n/a","backpack","umbrella","n/a","n/a","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","n/a","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","n/a","dining table","n/a","n/a","toilet","n/a","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","n/a","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"];
+                defaultConfigNodes.push(createConfigNode("Coco SSD TfLite Coral", {
+                    runtime: "tflite",
+                    model: "models/coco-coral/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite",
+                    modelType: "path",
+                    labels: '["' + labels2.join('","') + '"]',
+                    labelsType: "json",
+                    colors: "[]",
+                    colorsType: "json",
+                    bboxProperty: 1,
+                    bboxPropertyType: "index",
+                    classProperty: 3,
+                    classPropertyType: "index",
+                    scoreProperty: 0,
+                    scorePropertyType: "index",
+                    countProperty: 2,
+                    countPropertyType: "index",
+                    bboxFormat: "[y1,x1,y2,x2]",
+                    resizeAlgorithm: "neirest"
+                }));
+
+                var labels3 = ["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"];
+                defaultConfigNodes.push(createConfigNode("Yolo v5 S", {
+                    runtime: "graph",
+                    model: "models/yolo5s/model.json",
+                    modelType: "path",
+                    labels: '["' + labels3.join('","') + '"]',
+                    labelsType: "json",
+                    colors: "[]",
+                    colorsType: "json",
+                    bboxProperty: 0,
+                    bboxPropertyType: "index",
+                    classProperty: 2,
+                    classPropertyType: "index",
+                    scoreProperty: 1,
+                    scorePropertyType: "index",
+                    countProperty: 3,
+                    countPropertyType: "index",
+                    bboxFormat: "[x1,y1,x2,y2]",
+                    resizeAlgorithm: "neirest"
+                }));
+
+                var labels4 = ["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"];
+                defaultConfigNodes.push(createConfigNode("Yolo v5 N", {
+                    runtime: "graph",
+                    model: "models/yolo5n/model.json",
+                    modelType: "path",
+                    labels: '["' + labels4.join('","') + '"]',
+                    labelsType: "json",
+                    colors: "[]",
+                    colorsType: "json",
+                    bboxProperty: 0,
+                    bboxPropertyType: "index",
+                    classProperty: 2,
+                    classPropertyType: "index",
+                    scoreProperty: 1,
+                    scorePropertyType: "index",
+                    countProperty: 3,
+                    countPropertyType: "index",
+                    bboxFormat: "[x1,y1,x2,y2]",
+                    resizeAlgorithm: "neirest"
+                }));
+
+                // Add the new config nodes in the dropdown
+                defaultConfigNodes.forEach(function (defaultConfigNode, index) {
+                    $("#node-input-tensorflowConfig").append($('<option>', {
+                        value: defaultConfigNode.id,
+                        text: defaultConfigNode.name
+                    }));
+                });
+                
+                // Make sure the "Coco SSD Tfjs" is selected by default.
+                // Otherwise they would only be displayed in the list, the next time this config screen is being openened.
+                // TODO check why this doesn't work
+                $("#node-input-tensorflowConfig").val("Coco SSD Tfjs").change();
+            })
+
+            if (this.lineColor === undefined) {
+                $("#node-input-lineColor").val("magenta");
             }
             $("#node-input-passthru").change( function() {
                 if ($("#node-input-passthru").val() === "bbox") {
-                    $("#node-bbox-colour").show();
+                    $("#node-bbox-color").show();
                 }
                 else {
-                    $("#node-bbox-colour").hide();
+                    $("#node-bbox-color").hide();
                 }
             });
         }

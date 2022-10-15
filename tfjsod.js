@@ -3,7 +3,6 @@ module.exports = function (RED) {
     function TensorFlowObjDet(n) {
         var fs = require('fs');
         var path = require('path');
-        var jpeg = require('jpeg-js');
         var express = require("express");
         var pureimage = require("pureimage");
         var compression = require("compression");
@@ -16,17 +15,22 @@ module.exports = function (RED) {
         /* ************************************************************** */
 
         RED.nodes.createNode(this, n);
-        this.model = n.model;
-        this.modelUrlType = n.modelUrlType;
         this.scoreThreshold = n.scoreThreshold;
         this.maxDetections = n.maxDetections;
         this.passthru = n.passthru || "false";
-        this.modelUrl = n.modelUrl || undefined;
-        this.lineColour = n.lineColour || "magenta";
-        this.colors = [this.lineColour];
+        this.outputFormat = n.outputFormat;
+        this.lineColor = n.lineColor || "magenta";
+        this.colors = [];
+        this.tensorflowConfig = n.tensorflowConfig;
+        this.tensorflowConfigNode = null;
+        this.model = null;
+
         var node = this;
-        var model;
-        const yoloModel = "yolo5s"; // use yolo5s or yolo5n
+
+        if (node.tensorflowConfig) {
+            // Retrieve the config node, where the model is configured
+            node.tensorflowConfigNode = RED.nodes.getNode(node.tensorflowConfig);
+        }
 
         RED.httpNode.use(compression());
         RED.httpNode.use('/models', express.static(__dirname + '/models'));
@@ -49,23 +53,125 @@ module.exports = function (RED) {
         loadFont();
 
         async function loadModel() {
+            var modelUrl;
+            
+            node.status({fill:'yellow', shape:'ring', text:'Loading labels...'});
+ 
+            try {
+                // Load the labels, to identify the type of selected object (e.g. person, car, ...)
+                switch(node.tensorflowConfigNode.labelsType) {
+                case "path":
+                    var labelsPath = node.tensorflowConfigNode.labels;
+
+                    if(!path.isAbsolute(labelsPath)) {
+                        labelsPath= path.resolve(__dirname, labelsPath);
+                    }
+
+                    var labelsBuffer = fs.readFileSync(labelsPath);
+                    node.labels = labelsBuffer.toString().split(/\r?\n/);
+                    break;
+                case "url":
+                    var response = await nodeFetch(node.tensorflowConfigNode.labels);
+                    if(!response.ok) {
+                        throw response.statusText;
+                    }
+
+                    var body = response.getBody();
+                    node.labels = body.toString().split(/\r?\n/);
+                    break;
+                case "json":
+                    node.labels = JSON.parse(node.tensorflowConfigNode.labels);
+                    break;
+                }
+                
+                if(!Array.isArray(node.labels)) {
+                    throw "The content is not an array";
+                }
+            }
+            catch(err) {
+                node.status({fill:'red', shape:'ring', text:'Failed to load labels'});
+                node.error("Can't load labels: " + err);
+                node.labels = null;
+                return;
+            }
+
+            node.status({fill:'yellow', shape:'ring', text:'Loading colors...'});
+
+            try {
+                // Load the colors, one for every type of selected object (e.g. person=red, car=green, ...)
+                switch(node.tensorflowConfigNode.colorsType) {
+                case "path":
+                    var colorsPath = node.tensorflowConfigNode.colors;
+
+                    if(!path.isAbsolute(colorsPath)) {
+                        labelsPath= path.resolve(__dirname, colorsPath);
+                    }
+
+                    var colorsBuffer = fs.readFileSync(colorsPath);
+                    node.colors = colorsBuffer.toString().split(/\r?\n/);
+                    break;
+                case "url":
+                    var response = await nodedeFetch(node.tensorflowConfigNode.colors);
+                    if(!response.ok) {
+                        throw response.statusText;
+                    }
+
+                    var body = response.getBody();
+                    node.labels = body.toString().split(/\r?\n/);
+                    break;
+                case "json":
+                    node.colors = JSON.parse(node.tensorflowConfigNode.colors);
+                    break;
+                }
+                
+                // The colors are optional, but when they are specified they should be correct
+                if(node.colors) {
+                    if(!Array.isArray(node.colors)) {
+                        throw "The content is not an array";
+                    }
+                    
+                    if(node.colors.length > 0 && node.colors.length != node.labels.length) {
+                        throw "The number of colors (" + node.colors.length + " does not match the number of labels (" + node.labels.length + ")";
+                    }
+                }
+            }
+            catch(err) {
+                node.status({fill:'red', shape:'ring', text:'Failed to load colors'});
+                node.error("Can't load colors: " + err);
+                node.colors = null;
+                // Non blocking...
+                //return;
+            }
+
             node.status({fill:'yellow', shape:'ring', text:'Loading model...'});
-            // TODO add the labels file (https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt) to Dave's repository instead of the labels array below??
-            //labels = fs.readFileSync('./model/labels.txt', 'utf8').split('\n');
+
+            switch(node.tensorflowConfigNode.modelType) {
+            case "path":
+                // TODO this currently only works for RELATIVE paths e.g. "models/coco-ssd/model.json"
+                modelUrl = "http://localhost:" + RED.settings.uiPort + RED.settings.httpNodeRoot + node.tensorflowConfigNode.model;
+                break;
+            case "url":
+                modelUrl = node.tensorflowConfigNode.model;
+                break;
+            }
+
+            console.log("Loading the " + node.tensorflowConfigNode.runtime + " model from " + node.tensorflowConfigNode.model);
 
             // Initialize the model
-            switch(node.model) {
-            case "coco_ssd_mobilenet_v2":
-                if (node.modelUrlType === "local") {
-                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/coco-ssd/model.json";
-                }
-                model = await cocoSsd.load({modelUrl: node.modelUrl});
-                node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",")
-                node.log("Loaded Mobilenet");
-                node.status({fill:'green', shape:'dot', text:'MobileNet v2 ready'});
+            switch(node.tensorflowConfigNode.runtime) {
+            case "tfjs":
+                cocoSsd.load({modelUrl: modelUrl}).then(model => {
+                    node.model = model;
+                    node.ready = true;
+                    node.status({fill:'green', shape:'dot', text:'Tfjs model ready'});
+                }).catch(err => {
+                    node.status({fill:'red', shape:'ring', text:'Failed to load model'});
+                    node.error("Can't load tfjs model: ", err);
+                });
+
                 break;
 
-            case "coco_ssd_mobilenet_v2_coral":
+            case "tflite":
                 // This is not a great fix for thing not working on Mac - but at least keeps the other options working
                 try {
                     var tflite = require('tfjs-tflite-node');
@@ -76,68 +182,39 @@ module.exports = function (RED) {
                     node.error("Failed to load TFLite library",e);
                     return;
                 }
-                if (node.modelUrlType === "local") {
-                    // Coral edge TPU models available at https://coral.ai/models/
-                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/coco-coral/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite"
-                }
-                if (node.modelUrl === undefined) {
-                    node.modelUrl = "https://raw.githubusercontent.com/google-coral/test_data/master/tf2_ssd_mobilenet_v2_coco17_ptq_edgetpu.tflite";
-                }
+
+                //TODO: check whether the TPU runtime has been installed
+
                 // Use a Coral delegate, which makes use of the EdgeTPU Runtime Library (libedgetpu)..
                 // When no delegate is specified, the model would be processed by the CPU.
-                try {
-                    model = await tflite.loadTFLiteModel(node.modelUrl, {delegates: [new CoralDelegate()]});
-                    node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,n/a,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,n/a,backpack,umbrella,n/a,n/a,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,n/a,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,n/a,dining table,n/a,n/a,toilet,n/a,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,n/a,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",")
-                    node.log("Loaded TFLite");
-                }
-                catch(e) {
+                tflite.loadTFLiteModel(modelUrl, {delegates: [new CoralDelegate()]}).then(model => {
+                    node.model = model;
+                    node.ready = true;
+                    node.status({fill:'green', shape:'dot', text:'TFLite model ready'});
+                }).catch(err => {
                     node.status({fill:'red', shape:'ring', text:'Failed to load model'});
-                    node.error("Can't load TFLite model",e);
-                    return;
-                }
-                node.status({fill:'green', shape:'dot', text:'MobileNet(Coral) ready'});
+                    node.error("Can't load TFLite model: ", err);
+                });
+                
                 break;
 
-            case "yolo_ssd_v5":
-                if (node.modelUrlType === "local") {
-                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/"+yoloModel+"/model.json";
-                }
-                if (node.modelUrl === undefined) {
-                    node.modelUrl = "https://raw.githubusercontent.com/Hyuto/yolov5-tfjs/master/public/yolov5n_web_model/model.json";
-                }
-                model = await tf.loadGraphModel(node.modelUrl);
-                node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",")
-                node.log("Loaded Yolo model");
-                node.status({fill:'green', shape:'dot', text:'Yolov5 ready'});
-                break;
+            case "graph":
+                tf.loadGraphModel(modelUrl).then(model => {
+                    node.model = model;
+                    node.ready = true;
+                    node.status({fill:'green', shape:'dot', text:'Graph model ready'});
+                }).catch(err => {
+                    node.status({fill:'red', shape:'ring', text:'Failed to load model'});
+                    node.error("Can't load graph model: ", err);
+                });
 
-            case "yolo_ssd_v5_custom":
-                if (node.modelUrlType === "local") {
-                    node.modelUrl = "http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/custom/model.json";
-                }
-                node.log("Yolo Custom URL "+node.modelUrl)
-                model = await tf.loadGraphModel(node.modelUrl);
-                node.log("Loaded Custom model");
-                node.labels = "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush".split(",");
-                var response = await fetch("http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/custom/labels.txt");
-                if (response.status === 200) {
-                    node.labels = (await response.text()).replace(/[\r\n]/gm, ',').replace(/,,/gm, ',').split(',');
-                    node.log("Loaded Custom labels "+node.labels)
-                }
-                response = await fetch("http://localhost:"+RED.settings.uiPort+RED.settings.httpNodeRoot+"models/custom/colors.txt");
-                if (response.status === 200) {
-                    node.colors = (await response.text()).replace(/[\r\n]/gm, ',').replace(/,,/gm, ',').split(',');
-                    node.log("Loaded Custom colours "+node.colors)
-                }
-                node.status({fill:'green', shape:'dot', text:'Custom Yolov5 ready'});
                 break;
             }
-
-            node.ready = true;
-
         }
 
-        loadModel();
+        if (node.tensorflowConfigNode) {
+            loadModel();
+        }
 
         async function getImage(msg) {
             fetch(msg.payload)
@@ -146,195 +223,366 @@ module.exports = function (RED) {
                 .then(function() {handleMsg(msg) });
         }
 
+        function getOutputProperty(output, name, property, propertyType) {
+            var propertyTensor;
+
+            // The 'property' can be a property name or a property index
+            switch(propertyType) {
+                case "index":
+                    var outputValues = Object.values(output);
+                    
+                    if(property >= outputValues.length) {
+                        throw "Cannot get " + name + " from the detection result, because the index " + property + " is out of range";
+                    }
+                    
+                    propertyTensor = outputValues[property]; // N-th value
+                    break;
+                case "name":
+                    if(!output.hasOwnProperty(property)) {
+                        throw "Cannot get " + name + " from the detection result, because the property " + property + " does not exist";
+                    }
+                
+                    propertyTensor = output[property];
+                    break;
+            }
+
+            return propertyTensor.arraySync()[0];
+        }
+
         async function handleMsg(msg) {
+            var resizedImageTensor;
+
             if (node.passthru === "true") { msg.image = msg.payload; }
 
             node.startTime = process.hrtime();
             msg.executionTimes = {};
             msg.maxDetections = msg.maxDetections || node.maxDetections || 40;
 
+            // ---------------------------------------------------------------------------------------------------------
+            // 1. Decode the input image to raw pixels (and store it inside a tensor)
+            // ---------------------------------------------------------------------------------------------------------
+
             // Decode the image and convert it to a tensor (in this case it will become 3D tensors based on the encoded bytes).
             // The tfjs image decoding supports BMP, GIF, JPEG and PNG.
             try {
                 var imageTensor = tf.node.decodeImage(msg.payload);
             }
-            catch(e) {
-                node.error("Payload does not seem to be a valid image buffer.",msg)
+            catch(er) {
+                node.error("Error while decoding input image: " + err);
                 return;
             }
-            
+
             msg.executionTimes.decoding = getDuration();
 
-            var modelWidth, modelHeight, input;
+            // ---------------------------------------------------------------------------------------------------------
+            // 2. Prepare the input image
+            // ---------------------------------------------------------------------------------------------------------
 
-            var makeBoxes = function(boxes, scores, classes, count) {
-                var imageHeight = imageTensor.shape[0];
-                var imageWidth = imageTensor.shape[1];
-                for (var i = 0; i < count; i++) {
-                    // var score = scores[i];
-                    // if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
-                    const clazz = node.labels[classes[i]];
-                    // only report those that we have in the labels array.
-                    if (clazz) {
-                        var x1 = parseInt(Math.max(0, boxes[i*4+0] * imageWidth));
-                        var y1 = parseInt(Math.max(0, boxes[i*4+1] * imageHeight));
-                        var x2 = parseInt(Math.min(imageWidth, boxes[i*4+2] * imageWidth));
-                        var y2 = parseInt(Math.min(imageHeight, boxes[i*4+3] * imageHeight));
+            var modelWidth, modelHeight;
 
-                        msg.payload.push({
-                            class: clazz,
-                            bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
-                            score: scores[i]
-                        })
+            // Get the image dimensions expected by the model, which corresponds to the dimensions of the images that have been used to train the model.
+            // These dimensions are stored in the model shape tensor, which contains the following information: [batchsize, width, height, colorCount]
+            if(node.tensorflowConfigNode.runtime === "tfjs") {
+                // The tfjs model contains of a sub-model instance
+                modelWidth = node.model.model.inputs[0].shape[1];
+                modelHeight = node.model.model.inputs[0].shape[2];
+            }
+            else {
+                modelWidth = node.model.inputs[0].shape[1];
+                modelHeight = node.model.inputs[0].shape[2];
+            }
+            
+            // Get the dimensions of the input image
+            var imageHeight = imageTensor.shape[0];
+            var imageWidth = imageTensor.shape[1];
+            
+            // Preprocessing is NOT required for runtime type 'tfjs', because the tfjs model has the image preprocessing code inside the tfjs model
+            if(node.tensorflowConfigNode.runtime === "tfjs") {
+                resizedImageTensor = imageTensor;
+            }
+            else {
+                // Resize the input image if it's dimensions don't match with the model requirement
+                if(imageHeight != modelHeight || imageWidth != modelWidth) {
+                    // Otherwise the prediction will throw an exception.  For example: Input tensor shape mismatch: expect '1,300,300,3', got '1,480,640,3'.
+                    switch(node.tensorflowConfigNode.resizeAlgorithm) {
+                    case "bilinear":
+                        // The 'bilinear' algorithm offers smooth transitions.
+                        resizedImageTensor = tf.image.resizeBilinear(imageTensor, [modelWidth, modelHeight]);
+                        break;
+                    case "neirest":
+                        // The 'neirest neighbour' algorithm is the fastest one (which still delivers enough accuracy).
+                        resizedImageTensor = tf.image.resizeNearestNeighbor(imageTensor, [modelHeight, modelWidth]);
+                        break;
                     }
                 }
+                
+                if(node.model.inputs[0].dtype === 'float32' && resizedImageTensor.dtype === 'int32') {
+                    // When the model requires dtype int32, all tensor elements contain RGB colors in the range from 0 to 255.
+                    // When the model requires dtype int32, all tensor elements need to be normalized (to the range from 0 to 1).
+                    // To accomplish that, divide all tensor elements by 255
+                    resizedImageTensor = resizedImageTensor.div(255.0);
+                }
+ 
+                msg.executionTimes.resizing = getDuration();
+
+                // Transform the 3D image into a 4D tensor that the TfLite/Graph model requires.
+                // Otherwise the prediction will throw an exception.  For example: Input tensor shape mismatch: expect '1,300,300,3', got '300,300,3'.
+                resizedImageTensor = tf.expandDims(resizedImageTensor, 0);
             }
 
-            switch(node.model) {
-            case "coco_ssd_mobilenet_v2":
-                // The tfjs models work out-of-the-box since all Tensor handling is done inside the tfjs models.
-                // This in contradiction to the TfLite model below, in which case this node needs to do all input/output processing on its own...
-                // The resulting bounding boxes will have format [x_min, y_min, width, height].
-                msg.payload = await model.detect(imageTensor, msg.maxDetections);
+            // ---------------------------------------------------------------------------------------------------------
+            // 3. Execute object detection on the image
+            // ---------------------------------------------------------------------------------------------------------
+            
+            var detectionResult;
+
+            switch(node.tensorflowConfigNode.runtime) {
+            case "tfjs":
+                // The tfjs models are pretty easy to use, since all Tensor handling is done inside the tfjs models.
+                // Which means the input is an image, and the output is bboxes/scores/...
+                // This in contradiction to the other models (TfLite, Graph, ...), where all input/output processing needs to be done by this node.
+                // TODO don't use await to avoid uncaught exceptions
+                detectionResult = await node.model.detect(imageTensor, msg.maxDetections);
                 break;
 
-            case "coco_ssd_mobilenet_v2_coral":
-                var resizedImageWidth = 300;
-                var resizedImageHeight = 300;
-
-                // This model has been trained on images of size 300x300, which means our input images also need to have that same size.
-                // Otherwise the prediction will throw an exception: Input tensor shape mismatch: expect '1,300,300,3', got '1,480,640,3'.
-                // We will use the 'neirest neighbour' algorithm, because that is the fastest one (which still delivers enough accuracy).
-                var resizedImageTensor = tf.image.resizeNearestNeighbor(imageTensor, [resizedImageHeight, resizedImageWidth]);
-
-                // Transform the 3D image into a 4D tensor that the TfLite model requires.
-                // Otherwise the prediction will throw following exception: Input tensor shape mismatch: expect '1,300,300,3', got '300,300,3'.
-                resizedImageTensor = tf.expandDims(resizedImageTensor, 0);
-
+            case "tflite":
                 // It is NOT required to normalize the input images (i.e. from values in the range [0, 255] to [0,1]).
                 // Because this model (which is a TfLite model converted for Coral TPU's) requires uint8 values, in contradiction to its original models.
                 // The model throws an exception if we normalize the input images: "Data type mismatch: input tensor expects 'uint8', got 'float32'"
 
-                // Run the object detection on the image.
-                var prediction = model.predict(resizedImageTensor);
-
-                // Parse the output from the object detection.  Each model will produce different output.
-                // For example here https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2 you can see which date each tensor in output result contains.
-                var bboxes = prediction["StatefulPartitionedCall:3;StatefulPartitionedCall:2;StatefulPartitionedCall:1;StatefulPartitionedCall:0"].arraySync()[0];
-                var classes = prediction["StatefulPartitionedCall:3;StatefulPartitionedCall:2;StatefulPartitionedCall:1;StatefulPartitionedCall:01"].arraySync()[0];
-                var scores = prediction["StatefulPartitionedCall:3;StatefulPartitionedCall:2;StatefulPartitionedCall:1;StatefulPartitionedCall:02"].arraySync()[0];
-                var objectCount = prediction["StatefulPartitionedCall:3;StatefulPartitionedCall:2;StatefulPartitionedCall:1;StatefulPartitionedCall:03"].arraySync()[0];
-
-                // TODO check whether it is usefull to call tf.image.nonMaxSuppressionAsync() ???
-                // See here how this algorithm works: https://www.analyticsvidhya.com/blog/2020/08/selecting-the-right-bounding-box-using-non-max-suppression-with-implementation/
-
-                // Get the original image dimensions from the unresized 3D tensor
-                var imageHeight = imageTensor.shape[0];
-                var imageWidth = imageTensor.shape[1];
-
-                msg.payload = [];
-
-                for(var i = 0; i < objectCount; i++) {
-                    var score = scores[i];
-                    if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
-                        var clazz = classes[i];
-
-                        // The normalized bbox has the format [ymin, xmin, ymax, xmax]
-                        var normalizedBbox = bboxes[i];
-
-                        // Denormalization can be executed by multiplying with the image width and height.
-                        // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
-                        // The prediction can give coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
-                        var x1 = parseInt(Math.max(0, normalizedBbox[1] * imageWidth));
-                        var y1 = parseInt(Math.max(0, normalizedBbox[0] * imageHeight));
-                        var x2 = parseInt(Math.min(imageWidth, normalizedBbox[3] * imageWidth));
-                        var y2 = parseInt(Math.min(imageHeight, normalizedBbox[2] * imageHeight));
-
-                        msg.payload.push({
-                            class: node.labels[clazz],
-                            bbox: [x1, y1, Math.abs(x2 - x1), Math.abs(y2 - y1)], // Denormalized bbox with format [x_min, y_min, width, height]
-                            score: scores[i]
-                        })
-                    }
-                }
+                detectionResult = node.model.predict(resizedImageTensor);
                 break;
 
-            case "yolo_ssd_v5":
-            case "yolo_ssd_v5_custom":
-                [modelWidth, modelHeight] = model.inputs[0].shape.slice(1, 3);
-                input = tf.tidy(() => {
-                    return tf.image
-                        .resizeBilinear(imageTensor, [modelWidth, modelHeight])
-                        .div(255.0)
-                        .expandDims(0);
-                });
-
-                msg.payload = [];
-                await model.executeAsync(input).then((res) => {
-                    const [boxes, scores, classes, rc] = res.slice(0, 4);
-                    const boxes_data = boxes.dataSync();
-                    const scores_data = scores.dataSync();
-                    const classes_data = classes.dataSync();
-                    const rc_data = rc.dataSync();
-                    // console.log("BD",boxes_data)
-                    // console.log("SD",scores_data)
-                    // console.log("CD",classes_data)
-                    // console.log("RC",rc_data[0])
-                    // res.forEach(t => t.print());
-                    makeBoxes(boxes_data, scores_data, classes_data, rc_data[0]);
+            case "graph":
+                // TODO can predict also be used here instead of executeAsync?
+                await node.model.executeAsync(resizedImageTensor).then(result => {
+                    detectionResult = result
+                }).catch(err => {
+                    throw err;
                 });
                 break;
             }
 
-            msg.model = node.model;
             msg.executionTimes.detection = getDuration();
+
+            // ---------------------------------------------------------------------------------------------------------
+            // 4. Parse the object detection output (tensors)
+            // ---------------------------------------------------------------------------------------------------------
+
             msg.shape = imageTensor.shape;
             msg.classes = {};
             msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
+            
+            // Postprocessing is NOT required for runtime type 'tfjs', because the tfjs model has the postprocessing code inside the tfjs model
+            if(node.tensorflowConfigNode.runtime === "tfjs") {
+                msg.payload = detectionResult;
+            }
+            else {
+                msg.payload = [];
 
-            console.log("RESULTS",msg.payload.length,msg.payload)
+                // Get the required information from the specified output tensors
+                var bboxes      = getOutputProperty(detectionResult, "bboxes"      , node.tensorflowConfigNode.bboxProperty , node.tensorflowConfigNode.bboxPropertyType);
+                var classes     = getOutputProperty(detectionResult, "classes"     , node.tensorflowConfigNode.classProperty, node.tensorflowConfigNode.classPropertyType);
+                var scores      = getOutputProperty(detectionResult, "scores"      , node.tensorflowConfigNode.scoreProperty, node.tensorflowConfigNode.scorePropertyType);
+                var objectCount = getOutputProperty(detectionResult, "object count", node.tensorflowConfigNode.countProperty, node.tensorflowConfigNode.countPropertyType);
+
+                for(var i = 0; i < objectCount; i++) {
+                    var score = scores[i];
+
+                    if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
+                        var classIndex = classes[i];
+
+                        // The normalized bbox has the format [ymin, xmin, ymax, xmax]
+                        var normalizedBbox = bboxes[i];
+                        
+                        var x1, y1, x2, y2;
+                        
+                        // Determine the bbox upper-left and lower-right corner points, based on the specified model output bbox format
+                        switch(node.tensorflowConfigNode.bboxFormat) {
+                        case "[x1,y1,x2,y2]":
+                            x1 = normalizedBbox[0];
+                            y1 = normalizedBbox[1];
+                            x2 = normalizedBbox[2];
+                            y2 = normalizedBbox[3];
+                            break;
+                        case "[y1,x1,y2,x2]":
+                            x1 = normalizedBbox[1];
+                            y1 = normalizedBbox[0];
+                            x2 = normalizedBbox[3];
+                            y2 = normalizedBbox[2];
+                            break;
+                        case "[x1,y1,w,h]":
+                            x1 = normalizedBbox[0];
+                            y1 = normalizedBbox[1];
+                            x2 = normalizedBbox[2] - normalizedBbox[0];
+                            y2 = normalizedBbox[3] - normalizedBbox[1];
+                            break;
+                        case "[y1,x1,h,w]":
+                            x1 = normalizedBbox[1];
+                            y1 = normalizedBbox[0];
+                            x2 = normalizedBbox[3] - normalizedBbox[1];
+                            y2 = normalizedBbox[2] - normalizedBbox[0];
+                            break;
+                        }
+
+                        // Denormalization can be executed by multiplying with the image width and height.
+                        // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
+                        x1 *= imageWidth;
+                        x2 *= imageWidth;
+                        y1 *= imageHeight;
+                        y2 *= imageHeight;
+                        
+                        // The detection result can contain coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
+                        var x1 = Math.max(0, x1);
+                        var y1 = Math.max(0, y1);
+                        var x2 = Math.min(imageWidth, x2);
+                        var y2 = Math.min(imageHeight, y2);
+                        
+                        // Calculate the bbox dimensions
+                        var width = Math.abs(x2 - x1);
+                        var height = Math.abs(y2 - y1);
+                        
+                        // For all runtime types we will send the bbox in the format [x_min, y_min, width, height]
+                        var denormalizedBbox = [x1, y1, width, height];
+
+                        msg.payload.push({
+                            classIndex: classIndex,
+                            class: node.labels[classIndex],
+                            bbox: denormalizedBbox,
+                            score: scores[i]
+                        })
+                    }
+                }
+            }
+
             // TODO add filtering based on minimum and maximum bbox size.
 
-            // sort the array so we get highest scores first in case we trim the lenght
+            // Sort the array so we get highest scores, to make sure the highest scores are preserved in case the array length is trimmed afterward
             msg.payload.sort((a, b) => (a.score < b.score) ? 1 : -1)
+            
             for (var j=0; j < Math.min(msg.payload.length, msg.maxDetections); j++) {
+                // TODO use a reduce function for this
                 if (msg.payload[j].score < msg.scoreThreshold) {
                     msg.payload.splice(j,1);
                     j = j - 1;
                 }
+                
+                // TODO in a separate loop??
                 if (msg.payload[j] && msg.payload[j].hasOwnProperty("class")) {
                     msg.classes[msg.payload[j].class] = (msg.classes[msg.payload[j].class] || 0 ) + 1;
                 }
             }
 
-            tf.dispose(imageTensor);
+            // ---------------------------------------------------------------------------------------------------------
+            // 5. Draw the bounding boxes on top of the raw image (if required)
+            // ---------------------------------------------------------------------------------------------------------
 
-            // Draw bounding boxes on the image
             if (node.passthru === "bbox") {
-                var jimg;
+                var rgbaTensor;
 
-                if (node.passthru === "bbox") { jimg = jpeg.decode(msg.image); }
-                var pimg = pureimage.make(jimg.width,jimg.height);
-                var ctx = pimg.getContext('2d');
-                var scale = parseInt((jimg.width + jimg.height) / 500 + 0.5);
-                ctx.bitmap.data = jimg.data;
-                for (var k=0; k<msg.payload.length; k++) {
-                    // lookup the index of the class to cross ref into colour table
-                    const col = node.colors[node.labels.indexOf(msg.payload[k].class)];
-                    ctx.fillStyle = col || node.lineColour;
-                    ctx.strokeStyle = col || node.lineColour;
-                    ctx.font = scale*8+"pt 'Source Sans Pro'";
-                    ctx.fillText(msg.payload[k].class, msg.payload[k].bbox[0] + 4, msg.payload[k].bbox[1] - 4)
-                    ctx.lineWidth = scale;
-                    ctx.lineJoin = 'bevel';
-                    ctx.rect(msg.payload[k].bbox[0], msg.payload[k].bbox[1], msg.payload[k].bbox[2], msg.payload[k].bbox[3]);
-                    ctx.stroke();
+                if (imageTensor.shape[2] === 3) {
+                    // When the image tensor contains RGB (i.e. 3 channels), a fourth alpha channel needs to be added.
+                    // PureImage requires RGBA data to display inside it's canvas, so no RGB data is allowed.
+                    // This is similar to the html canvas (see https://developer.mozilla.org/en-US/docs/Web/API/ImageData/data).
+                    // So add an alpha channel to the image if it is missing.  This will be the case for decoded jpeg's, since jpeg has no transparency support.
+                    // We have asked the Tensorflow team to add alpha channel support for jpeg (see https://github.com/tensorflow/tfjs/issues/6911).
+                    var alphaChannelTensor = tf.fill([imageHeight, imageWidth, 1], 255, 'int32');
+                    rgbaTensor = tf.concat([imageTensor, alphaChannelTensor], 2);
+                }
+                else {
+                    // The image tensor contains RGBA (i.e. 4 channels), when it's shape is [height, width, 4]).
+                    rgbaTensor = imageTensor;
                 }
 
+                // Get the (decoded) input image data from the image tensor
+                var rawImage = rgbaTensor.dataSync(); 
+
+                msg.executionTimes.rgb_to_rgba = getDuration();
+
+                // Create a new empty PureImage 2D canvas
+                var pimg = pureimage.make(imageWidth, imageHeight);
+                var ctx = pimg.getContext('2d');
+                var scale = parseInt((imageWidth + imageHeight) / 500 + 0.5);
+
+                // Store the raw image inside the PureImage 2D canvas
+                ctx.bitmap.data = rawImage;
+
+                // Draw all the bounding boxes in the PureImage 2D canvas
+                msg.payload.forEach(function (detectedObject, index) {
+                    var bboxColor;
+
+                    if(node.colors && Array.isArray(node.colors) && node.colors.length > 0) {
+                        // Lookup the index of the class to cross ref into color table
+                        bboxColor = node.colors[detectedObject.classIndex];
+                    }
+                    else {
+                        // Apply the specified default color
+                        bboxColor = node.lineColor;
+                    }
+
+                    ctx.fillStyle = bboxColor;
+                    ctx.strokeStyle = bboxColor;
+                    ctx.font = scale*8+"pt 'Source Sans Pro'";
+                    ctx.fillText(detectedObject.class, detectedObject.bbox[0] + 4, detectedObject.bbox[1] - 4)
+                    ctx.lineWidth = scale;
+                    ctx.lineJoin = 'bevel';
+                    ctx.rect(detectedObject.bbox[0], detectedObject.bbox[1], detectedObject.bbox[2], detectedObject.bbox[3]);
+                    ctx.stroke();
+                });
+
                 msg.executionTimes.drawing = getDuration();
-                msg.image = jpeg.encode(pimg,70).data;
-                msg.executionTimes.encoding = getDuration();
+                
+                // Convert the annotated image (from the PureImage canvas) to an rgba tensor
+                var annotatedImageTensor = tf.tensor3d(pimg.data, [imageHeight, imageWidth, 4], 'int32');
+                
+                // TODO the output image format (jpeg, raw, ...) should be adjustable in the config screen
+                
+                // The encodeJpeg does not support an alpha channel, so convert the annotated image tensor from RGBA to RGB
+                var channels = tf.split(annotatedImageTensor, 4, 2);            
+                var rgbTensor = tf.concat([channels[0], channels[1], channels[2]], 2);
+                
+                // Override the original image tensor by the one containing the bounding box drawings
+                tf.dispose(imageTensor);
+                imageTensor = rgbTensor;
+
+                msg.executionTimes.rgba_to_rgb = getDuration();
             }
+                
+            // ---------------------------------------------------------------------------------------------------------
+            // 6. Encode the raw (annotated) image to JPEG
+            // ---------------------------------------------------------------------------------------------------------
+            
+            if(node.outputFormat == "jpg") {
+                // Encode the RGB tensor to a JPEG image
+                var jpeg = await tf.node.encodeJpeg(imageTensor);
+                
+                // Convert the jpeg image from Uint8Array to a buffer
+                msg.image.data = Buffer.from(jpeg);
+                msg.image.type = "jpg";
+            }
+            else {
+                var imageArray.data = imageTensor.dataSync();
+
+                // Convert the raw image from Uint32Array to a buffer
+                msg.image = Buffer.from(imageArray);
+                msg.image.type = "raw";
+            }
+            
+            msg.image.width = imageWidth;
+            msg.image.height = imageHeight
+
+            msg.executionTimes.encoding = getDuration();
+
+            // Cleanup all tensors, to avoid memory leakage
+            tf.dispose([annotatedImageTensor, alphaChannelTensor, rgbaTensor]);
+
+            tf.dispose(imageTensor);
+
+            // Calculate the total execution time
+            msg.executionTimes.total = 0;
+            Object.values(msg.executionTimes).forEach(function (executionTime, index) {
+                msg.executionTimes.total += executionTime;
+            });
 
             node.send(msg);
         }
@@ -371,8 +619,8 @@ module.exports = function (RED) {
         node.on("close", function () {
             node.status({});
             node.ready = false;
-            model.dispose();
-            model = null;
+            node.model.dispose();
+            node.model = null;
             node.fnt = null;
         });
     }

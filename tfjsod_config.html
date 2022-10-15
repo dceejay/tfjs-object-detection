@@ -1,0 +1,200 @@
+<script type="text/html" data-template-name="tensorflowObjDetConfig">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" placeholder="Name">
+    </div>
+    </br>
+    <div class="form-row">
+        <label for="node-config-input-runtime"><i class="fa fa-microchip"></i> Runtime</label>
+        <select type="text" id="node-config-input-runtime" style="width:70%;">
+            <option value="tfjs">TfJs</option>
+            <option value="tflite">TfLite</option>
+            <option value="graph">Graph</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-model"><i class="fa fa-file-image-o"></i> Model</label>
+        <input type="text" id="node-config-input-model" style="width:70%;">
+        <input id="node-config-input-modelType" type="hidden">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-labels"><i class="fa fa-font"></i> Labels</label>
+        <input type="text" id="node-config-input-labels" style="width:70%;">
+        <input id="node-config-input-labelsType" type="hidden">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-colors"><i class="fa fa-paint-brush"></i> Colors</label>
+        <input type="text" id="node-config-input-colors" style="width:70%;">
+        <input id="node-config-input-colorsType" type="hidden">
+    </div>
+    <div class="form-row output-property-row">
+        <label for="node-config-input-bboxProperty"><i class="fa fa-object-group"></i> Bbox prop</label>
+        <input type="text" id="node-config-input-bboxProperty" style="width:70%;">
+        <input id="node-config-input-bboxPropertyType" type="hidden">
+    </div>
+    <div class="form-row output-property-row">
+        <label for="node-config-input-classProperty"><i class="fa fa-child"></i> Class prop</label>
+        <input type="text" id="node-config-input-classProperty" style="width:70%;">
+        <input id="node-config-input-classPropertyType" type="hidden">
+    </div>
+    <div class="form-row output-property-row">
+        <label for="node-config-input-scoreProperty"><i class="fa fa-percent"></i> Score prop</label>
+        <input type="text" id="node-config-input-scoreProperty" style="width:70%;">
+        <input id="node-config-input-scorePropertyType" type="hidden">
+    </div>
+    <div class="form-row output-property-row">
+        <label for="node-config-input-countProperty"><i class="fa fa-calculator"></i> Count prop</label>
+        <input type="text" id="node-config-input-countProperty" style="width:70%;">
+        <input id="node-config-input-countPropertyType" type="hidden">
+    </div>
+    <div class="form-row output-property-row">
+        <label for="node-input-bboxFormat"><i class="fa fa-arrows"></i> Bbox format</label>
+        <select type="text" id="node-input-bboxFormat" style="width:70%;">
+            <option value="[x1,y1,x2,y2]">[x1, y1, x2, y2]</option>
+            <option value="[y1,x1,y2,x2]">[y1, x1, y2, x2]</option>
+            <option value="[x1,y1,w,h]">[x1, y1, width, height]</option>
+            <option value="[y1,x1,h,w]">[y1, x1, height, width]</option>
+        </select>
+    </div>
+    <div class="form-row output-property-row">
+        <label for="node-input-resizeAlgorithm"><i class="fa fa-expand"></i> Resize</label>
+        <select type="text" id="node-input-resizeAlgorithm" style="width:70%;">
+            <option value="bilinear">Bilinear</option>
+            <option value="neirest">Neirest neighbour</option>
+        </select>
+    </div>
+</script>
+
+<script type="text/html" data-help-name="tensorflowObjDetConfig">
+    <p>Config node for TfJs object detection.</p>
+</script>
+
+<script type="text/javascript">
+    RED.nodes.registerType('tensorflowObjDetConfig',{
+        category: 'config',
+        color: '#ff758d',
+        defaults: {
+            runtime: {value:"tfjs"},
+            model: {value:"", validate: RED.validators.typedInput("modelType")},
+            modelType: {value:"local"},
+            labels: {value:[], validate: RED.validators.typedInput("labelsType")},
+            labelsType: {value:"json"},
+            colors: {value:[], validate: RED.validators.typedInput("colorsType")},
+            colorsType: {value:"json"},
+            bboxProperty: {value:0},
+            bboxPropertyType: {value:"index"},
+            classProperty: {value:1},
+            classPropertyType: {value:"index"},
+            scoreProperty: {value:2},
+            scorePropertyType: {value:"index"},
+            countProperty: {value:3},
+            countPropertyType: {value:"index"},
+            bboxFormat: {value:"[x1,y1,x2,y2]"},
+            resizeAlgorithm: {value:"neirest"},
+            name: {value:""}
+        },   
+        inputs:1,
+        outputs:1,
+        icon: "font-awesome/fa-cog",
+        label: function() {
+            return this.name || "Tfjs config";
+        },
+        oneditprepare: function() {
+            var node = this;
+
+            var nameOption = {
+                value: 'name',
+                label: 'result.',
+                hasValue: true
+            }
+
+            var indexOption = {
+                value: 'index',
+                label: 'result[x]',
+                hasValue: true
+            }
+
+            $("#node-config-input-bboxProperty").typedInput({
+                typeField: $("#node-input-bboxPropertyType"),
+                types:[indexOption, nameOption]
+            });
+            $("#node-config-input-bboxProperty").typedInput('type', node.bboxPropertyType);
+            
+            $("#node-config-input-classProperty").typedInput({
+                default: 'index',
+                typeField: $("#node-input-classPropertyType"),
+                types:[indexOption, nameOption]
+            });
+            $("#node-config-input-classProperty").typedInput('type', node.classPropertyType);
+
+            $("#node-config-input-scoreProperty").typedInput({
+                default: 'index',
+                typeField: $("#node-input-scorePropertyType"),
+                types:[indexOption, nameOption]
+            });
+            $("#node-config-input-scoreProperty").typedInput('type', node.scorePropertyType);
+
+            $("#node-config-input-countProperty").typedInput({
+                default: 'index',
+                typeField: $("#node-input-countPropertyType"),
+                types:[indexOption, nameOption]
+            });
+            $("#node-config-input-countProperty").typedInput('type', node.countPropertyType);
+
+
+            var localPathOption = {
+                value: 'path',
+                label: 'Path',
+                hasValue: true
+            }
+            
+            var urlOption = {
+                value: 'url',
+                label: 'URL',
+                hasValue: true
+            }
+
+            $("#node-config-input-model").typedInput({
+                default: 'path',
+                typeField: $("#node-config-input-modelType"),
+                types:[localPathOption, urlOption]
+            });
+            $("#node-config-input-model").typedInput('type', node.modelType);
+
+            $("#node-config-input-labels").typedInput({
+                default: 'json',
+                typeField: $("#node-config-input-labelsType"),
+                types:['json', localPathOption, urlOption]
+            });
+            $("#node-config-input-labels").typedInput('type', node.labelsType);
+            // See https://discourse.nodered.org/t/pass-array-to-typedinput-type-json/47608/4
+            $("#node-config-input-labels").typedInput("value", node.labels);
+
+            $("#node-config-input-colors").typedInput({
+                default: 'json',
+                typeField: $("#node-config-input-colorsType"),
+                types:['json', localPathOption, urlOption]
+            });
+            $("#node-config-input-colors").typedInput('type', node.colorsType);
+            // See https://discourse.nodered.org/t/pass-array-to-typedinput-type-json/47608/4
+            $("#node-config-input-colors").typedInput("value", node.colors);
+
+            // When the runtime type value changes, only the relevant property input fields should be displayed
+            $("#node-config-input-runtime").change(function() {
+                switch(this.value) {
+                    case "tfjs":
+                        // The tfjs model contains Js code that parses the output automatically, so no settings required
+                        $(".output-property-row").hide();
+                        break;
+                    case "tflite":
+                        $(".output-property-row").show();
+                        break;
+                    case "graph":
+                        $(".output-property-row").show();
+                        break;
+                }
+            });
+            $("#node-config-input-runtime").change();        
+        }
+    });
+</script>

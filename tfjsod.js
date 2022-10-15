@@ -283,7 +283,7 @@ module.exports = function (RED) {
         async function handleMsg(msg) {
             var resizedImageTensor;
 
-            if (node.passthru === "true") { msg.image = msg.payload; }
+            var inputImage = msg.payload;
 
             node.startTime = process.hrtime();
             msg.executionTimes = {};
@@ -296,7 +296,7 @@ module.exports = function (RED) {
             // Decode the image and convert it to a tensor (in this case it will become 3D tensors based on the encoded bytes).
             // The tfjs image decoding supports BMP, GIF, JPEG and PNG.
             try {
-                var imageTensor = tf.node.decodeImage(msg.payload);
+                var imageTensor = tf.node.decodeImage(inputImage);
             }
             catch(er) {
                 node.error("Error while decoding input image: " + err);
@@ -580,21 +580,29 @@ module.exports = function (RED) {
             // ---------------------------------------------------------------------------------------------------------
             // 6. Encode the raw (annotated) image to JPEG
             // ---------------------------------------------------------------------------------------------------------
-            
-            if(node.outputFormat == "jpg") {
-                // Encode the RGB tensor to a JPEG image
-                var jpeg = await tf.node.encodeJpeg(imageTensor);
-                
-                // Convert the jpeg image from Uint8Array to a buffer
-                msg.image.data = Buffer.from(jpeg);
-                msg.image.type = "jpg";
+
+            msg.image = {};
+
+            if (node.passthru === "true") {
+                msg.image.data = inputImage;
+                // TODO use https://www.npmjs.com/package/image-type to determine msg.image.type
             }
             else {
-                var imageArray = imageTensor.dataSync();
+                if(node.outputFormat == "jpg") {
+                    // Encode the RGB tensor to a JPEG image
+                    var jpeg = await tf.node.encodeJpeg(imageTensor);
+                    
+                    // Convert the jpeg image from Uint8Array to a buffer
+                    msg.image.data = Buffer.from(jpeg);
+                    msg.image.type = "jpg";
+                }
+                else {
+                    var imageArray = imageTensor.dataSync();
 
-                // Convert the raw image from Uint32Array to a buffer
-                msg.image.data = Buffer.from(imageArray);
-                msg.image.type = "raw";
+                    // Convert the raw image from Uint32Array to a buffer
+                    msg.image.data = Buffer.from(imageArray);
+                    msg.image.type = "raw"; // TODO: real mime type?
+                }
             }
             
             msg.image.width = imageWidth;
@@ -619,7 +627,6 @@ module.exports = function (RED) {
         node.on('input', function (msg) {
             try {
                 if (node.ready) {
-                    msg.image = msg.payload;
                     if (typeof msg.payload === "string") {
                         if (msg.payload.startsWith("http")) {
                             getImage(msg);

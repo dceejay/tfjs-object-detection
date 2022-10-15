@@ -561,10 +561,10 @@ module.exports = function (RED) {
                 msg.image.type = "jpg";
             }
             else {
-                var imageArray.data = imageTensor.dataSync();
+                var imageArray = imageTensor.dataSync();
 
                 // Convert the raw image from Uint32Array to a buffer
-                msg.image = Buffer.from(imageArray);
+                msg.image.data = Buffer.from(imageArray);
                 msg.image.type = "raw";
             }
             

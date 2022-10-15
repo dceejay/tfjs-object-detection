@@ -265,6 +265,21 @@ module.exports = function (RED) {
             throw new Error('invalid shape');
         }
 
+        function rgba2rgb(rgba) {
+            if (rgba.shape[2] === 3) {
+                return rgba;
+            }
+
+            if (rgba.shape[2] === 4) {
+                return tf.tidy(function() {
+                    const channels = tf.split(rgba, 4, 2);            
+                    return tf.concat([channels[0], channels[1], channels[2]], 2);
+                })
+            }
+
+            throw new Error('invalid shape');
+        };
+
         async function handleMsg(msg) {
             var resizedImageTensor;
 
@@ -553,8 +568,7 @@ module.exports = function (RED) {
                 // TODO the output image format (jpeg, raw, ...) should be adjustable in the config screen
                 
                 // The encodeJpeg does not support an alpha channel, so convert the annotated image tensor from RGBA to RGB
-                var channels = tf.split(annotatedImageTensor, 4, 2);            
-                var rgbTensor = tf.concat([channels[0], channels[1], channels[2]], 2);
+                rgbTensor = rgba2rgb(annotatedImageTensor);
                 
                 // Override the original image tensor by the one containing the bounding box drawings
                 tf.dispose(imageTensor);

@@ -54,16 +54,16 @@ module.exports = function (RED) {
 
         async function loadModel() {
             var modelUrl;
-            
+
             node.status({fill:'yellow', shape:'ring', text:'Loading labels...'});
- 
+
             try {
                 // Load the labels, to identify the type of selected object (e.g. person, car, ...)
                 switch(node.tensorflowConfigNode.labelsType) {
                 case "path":
                     var labelsPath = node.tensorflowConfigNode.labels;
 
-                    if(!path.isAbsolute(labelsPath)) {
+                    if (!path.isAbsolute(labelsPath)) {
                         labelsPath= path.resolve(__dirname, labelsPath);
                     }
 
@@ -72,7 +72,7 @@ module.exports = function (RED) {
                     break;
                 case "url":
                     var response = await nodeFetch(node.tensorflowConfigNode.labels);
-                    if(!response.ok) {
+                    if (!response.ok) {
                         throw response.statusText;
                     }
 
@@ -83,8 +83,8 @@ module.exports = function (RED) {
                     node.labels = JSON.parse(node.tensorflowConfigNode.labels);
                     break;
                 }
-                
-                if(!Array.isArray(node.labels)) {
+
+                if (!Array.isArray(node.labels)) {
                     throw "The content is not an array";
                 }
             }
@@ -103,7 +103,7 @@ module.exports = function (RED) {
                 case "path":
                     var colorsPath = node.tensorflowConfigNode.colors;
 
-                    if(!path.isAbsolute(colorsPath)) {
+                    if (!path.isAbsolute(colorsPath)) {
                         labelsPath= path.resolve(__dirname, colorsPath);
                     }
 
@@ -112,7 +112,7 @@ module.exports = function (RED) {
                     break;
                 case "url":
                     var response = await nodedeFetch(node.tensorflowConfigNode.colors);
-                    if(!response.ok) {
+                    if (!response.ok) {
                         throw response.statusText;
                     }
 
@@ -123,14 +123,14 @@ module.exports = function (RED) {
                     node.colors = JSON.parse(node.tensorflowConfigNode.colors);
                     break;
                 }
-                
+
                 // The colors are optional, but when they are specified they should be correct
-                if(node.colors) {
-                    if(!Array.isArray(node.colors)) {
+                if (node.colors) {
+                    if (!Array.isArray(node.colors)) {
                         throw "The content is not an array";
                     }
-                    
-                    if(node.colors.length > 0 && node.colors.length != node.labels.length) {
+
+                    if (node.colors.length > 0 && node.colors.length != node.labels.length) {
                         throw "The number of colors (" + node.colors.length + " does not match the number of labels (" + node.labels.length + ")";
                     }
                 }
@@ -195,7 +195,7 @@ module.exports = function (RED) {
                     node.status({fill:'red', shape:'ring', text:'Failed to load model'});
                     node.error("Can't load TFLite model: ", err);
                 });
-                
+
                 break;
 
             case "graph":
@@ -228,27 +228,27 @@ module.exports = function (RED) {
 
             // The 'property' can be a property name or a property index
             switch(propertyType) {
-                case "index":
-                    var outputValues = Object.values(output);
-                    
-                    if(property >= outputValues.length) {
-                        throw "Cannot get " + name + " from the detection result, because the index " + property + " is out of range";
-                    }
-                    
-                    propertyTensor = outputValues[property]; // N-th value
-                    break;
-                case "name":
-                    if(!output.hasOwnProperty(property)) {
-                        throw "Cannot get " + name + " from the detection result, because the property " + property + " does not exist";
-                    }
-                
-                    propertyTensor = output[property];
-                    break;
+            case "index":
+                var outputValues = Object.values(output);
+
+                if (property >= outputValues.length) {
+                    throw "Cannot get " + name + " from the detection result, because the index " + property + " is out of range";
+                }
+
+                propertyTensor = outputValues[property]; // N-th value
+                break;
+            case "name":
+                if (!output.hasOwnProperty(property)) {
+                    throw "Cannot get " + name + " from the detection result, because the property " + property + " does not exist";
+                }
+
+                propertyTensor = output[property];
+                break;
             }
 
             return propertyTensor.arraySync()[0];
         }
-        
+
         // See https://github.com/tensorflow/tfjs/issues/6911#issuecomment-1271805344
         function rgb2rgba(rgb) {
             if (rgb.shape[2] === 4) {
@@ -272,7 +272,7 @@ module.exports = function (RED) {
 
             if (rgba.shape[2] === 4) {
                 return tf.tidy(function() {
-                    const channels = tf.split(rgba, 4, 2);            
+                    const channels = tf.split(rgba, 4, 2);
                     return tf.concat([channels[0], channels[1], channels[2]], 2);
                 })
             }
@@ -313,7 +313,7 @@ module.exports = function (RED) {
 
             // Get the image dimensions expected by the model, which corresponds to the dimensions of the images that have been used to train the model.
             // These dimensions are stored in the model shape tensor, which contains the following information: [batchsize, width, height, colorCount]
-            if(node.tensorflowConfigNode.runtime === "tfjs") {
+            if (node.tensorflowConfigNode.runtime === "tfjs") {
                 // The tfjs model contains of a sub-model instance
                 modelWidth = node.model.model.inputs[0].shape[1];
                 modelHeight = node.model.model.inputs[0].shape[2];
@@ -322,18 +322,18 @@ module.exports = function (RED) {
                 modelWidth = node.model.inputs[0].shape[1];
                 modelHeight = node.model.inputs[0].shape[2];
             }
-            
+
             // Get the dimensions of the input image
             var imageHeight = imageTensor.shape[0];
             var imageWidth = imageTensor.shape[1];
-            
+
             // Preprocessing is NOT required for runtime type 'tfjs', because the tfjs model has the image preprocessing code inside the tfjs model
-            if(node.tensorflowConfigNode.runtime === "tfjs") {
+            if (node.tensorflowConfigNode.runtime === "tfjs") {
                 resizedImageTensor = imageTensor;
             }
             else {
                 // Resize the input image if it's dimensions don't match with the model requirement
-                if(imageHeight != modelHeight || imageWidth != modelWidth) {
+                if (imageHeight != modelHeight || imageWidth != modelWidth) {
                     // Otherwise the prediction will throw an exception.  For example: Input tensor shape mismatch: expect '1,300,300,3', got '1,480,640,3'.
                     switch(node.tensorflowConfigNode.resizeAlgorithm) {
                     case "bilinear":
@@ -346,14 +346,14 @@ module.exports = function (RED) {
                         break;
                     }
                 }
-                
-                if(node.model.inputs[0].dtype === 'float32' && resizedImageTensor.dtype === 'int32') {
+
+                if (node.model.inputs[0].dtype === 'float32' && resizedImageTensor.dtype === 'int32') {
                     // When the model requires dtype int32, all tensor elements contain RGB colors in the range from 0 to 255.
                     // When the model requires dtype int32, all tensor elements need to be normalized (to the range from 0 to 1).
                     // To accomplish that, divide all tensor elements by 255
                     resizedImageTensor = resizedImageTensor.div(255.0);
                 }
- 
+
                 msg.executionTimes.resizing = getDuration();
 
                 // Transform the 3D image into a 4D tensor that the TfLite/Graph model requires.
@@ -364,7 +364,7 @@ module.exports = function (RED) {
             // ---------------------------------------------------------------------------------------------------------
             // 3. Execute object detection on the image
             // ---------------------------------------------------------------------------------------------------------
-            
+
             var detectionResult;
 
             switch(node.tensorflowConfigNode.runtime) {
@@ -403,9 +403,9 @@ module.exports = function (RED) {
             msg.shape = imageTensor.shape;
             msg.classes = {};
             msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
-            
+
             // Postprocessing is NOT required for runtime type 'tfjs', because the tfjs model has the postprocessing code inside the tfjs model
-            if(node.tensorflowConfigNode.runtime === "tfjs") {
+            if (node.tensorflowConfigNode.runtime === "tfjs") {
                 msg.payload = detectionResult;
             }
             else {
@@ -419,69 +419,70 @@ module.exports = function (RED) {
 
                 for(var i = 0; i < objectCount; i++) {
                     var score = scores[i];
-
-                    if(score >= node.scoreThreshold) { // TODO reuse the code from Dave
+                    if (score >= node.scoreThreshold) { // only report those above our cutoff score
                         var classIndex = classes[i];
+                        const clazz = node.labels[classIndex];
+                        // only report those that we have in the labels array.
+                        if (clazz) {
+                            // The normalized bbox has the format [ymin, xmin, ymax, xmax]
+                            var normalizedBbox = bboxes[i];
+                            var x1, y1, x2, y2;
 
-                        // The normalized bbox has the format [ymin, xmin, ymax, xmax]
-                        var normalizedBbox = bboxes[i];
-                        
-                        var x1, y1, x2, y2;
-                        
-                        // Determine the bbox upper-left and lower-right corner points, based on the specified model output bbox format
-                        switch(node.tensorflowConfigNode.bboxFormat) {
-                        case "[x1,y1,x2,y2]":
-                            x1 = normalizedBbox[0];
-                            y1 = normalizedBbox[1];
-                            x2 = normalizedBbox[2];
-                            y2 = normalizedBbox[3];
-                            break;
-                        case "[y1,x1,y2,x2]":
-                            x1 = normalizedBbox[1];
-                            y1 = normalizedBbox[0];
-                            x2 = normalizedBbox[3];
-                            y2 = normalizedBbox[2];
-                            break;
-                        case "[x1,y1,w,h]":
-                            x1 = normalizedBbox[0];
-                            y1 = normalizedBbox[1];
-                            x2 = normalizedBbox[2] - normalizedBbox[0];
-                            y2 = normalizedBbox[3] - normalizedBbox[1];
-                            break;
-                        case "[y1,x1,h,w]":
-                            x1 = normalizedBbox[1];
-                            y1 = normalizedBbox[0];
-                            x2 = normalizedBbox[3] - normalizedBbox[1];
-                            y2 = normalizedBbox[2] - normalizedBbox[0];
-                            break;
+                            // Determine the bbox upper-left and lower-right corner points, based on the specified model output bbox format
+                            switch(node.tensorflowConfigNode.bboxFormat) {
+                            case "[x1,y1,x2,y2]":
+                                x1 = normalizedBbox[0];
+                                y1 = normalizedBbox[1];
+                                x2 = normalizedBbox[2];
+                                y2 = normalizedBbox[3];
+                                break;
+                            case "[y1,x1,y2,x2]":
+                                x1 = normalizedBbox[1];
+                                y1 = normalizedBbox[0];
+                                x2 = normalizedBbox[3];
+                                y2 = normalizedBbox[2];
+                                break;
+                            case "[x1,y1,w,h]":
+                                x1 = normalizedBbox[0];
+                                y1 = normalizedBbox[1];
+                                x2 = normalizedBbox[2] - normalizedBbox[0];
+                                y2 = normalizedBbox[3] - normalizedBbox[1];
+                                break;
+                            case "[y1,x1,h,w]":
+                                x1 = normalizedBbox[1];
+                                y1 = normalizedBbox[0];
+                                x2 = normalizedBbox[3] - normalizedBbox[1];
+                                y2 = normalizedBbox[2] - normalizedBbox[0];
+                                break;
+                            }
+
+                            // Denormalization can be executed by multiplying with the image width and height.
+                            // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
+                            x1 *= imageWidth;
+                            x2 *= imageWidth;
+                            y1 *= imageHeight;
+                            y2 *= imageHeight;
+
+                            // The detection result can contain coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
+                            var x1 = Math.max(0, x1);
+                            var y1 = Math.max(0, y1);
+                            var x2 = Math.min(imageWidth, x2);
+                            var y2 = Math.min(imageHeight, y2);
+
+                            // Calculate the bbox dimensions
+                            var width = Math.abs(x2 - x1);
+                            var height = Math.abs(y2 - y1);
+
+                            // For all runtime types we will send the bbox in the format [x_min, y_min, width, height]
+                            var denormalizedBbox = [x1, y1, width, height];
+
+                            msg.payload.push({
+                                classIndex: classIndex,
+                                class: node.labels[classIndex],
+                                bbox: denormalizedBbox,
+                                score: scores[i]
+                            })
                         }
-
-                        // Denormalization can be executed by multiplying with the image width and height.
-                        // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
-                        x1 *= imageWidth;
-                        x2 *= imageWidth;
-                        y1 *= imageHeight;
-                        y2 *= imageHeight;
-                        
-                        // The detection result can contain coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
-                        var x1 = Math.max(0, x1);
-                        var y1 = Math.max(0, y1);
-                        var x2 = Math.min(imageWidth, x2);
-                        var y2 = Math.min(imageHeight, y2);
-                        
-                        // Calculate the bbox dimensions
-                        var width = Math.abs(x2 - x1);
-                        var height = Math.abs(y2 - y1);
-                        
-                        // For all runtime types we will send the bbox in the format [x_min, y_min, width, height]
-                        var denormalizedBbox = [x1, y1, width, height];
-
-                        msg.payload.push({
-                            classIndex: classIndex,
-                            class: node.labels[classIndex],
-                            bbox: denormalizedBbox,
-                            score: scores[i]
-                        })
                     }
                 }
             }
@@ -490,14 +491,14 @@ module.exports = function (RED) {
 
             // Sort the array so we get highest scores, to make sure the highest scores are preserved in case the array length is trimmed afterward
             msg.payload.sort((a, b) => (a.score < b.score) ? 1 : -1)
-            
+
             for (var j=0; j < Math.min(msg.payload.length, msg.maxDetections); j++) {
                 // TODO use a reduce function for this
                 if (msg.payload[j].score < msg.scoreThreshold) {
                     msg.payload.splice(j,1);
                     j = j - 1;
                 }
-                
+
                 // TODO in a separate loop??
                 if (msg.payload[j] && msg.payload[j].hasOwnProperty("class")) {
                     msg.classes[msg.payload[j].class] = (msg.classes[msg.payload[j].class] || 0 ) + 1;
@@ -525,7 +526,7 @@ module.exports = function (RED) {
                 }
 
                 // Get the (decoded) input image data from the image tensor
-                var rawImage = rgbaTensor.dataSync(); 
+                var rawImage = rgbaTensor.dataSync();
 
                 msg.executionTimes.rgb_to_rgba = getDuration();
 
@@ -541,7 +542,7 @@ module.exports = function (RED) {
                 msg.payload.forEach(function (detectedObject, index) {
                     var bboxColor;
 
-                    if(node.colors && Array.isArray(node.colors) && node.colors.length > 0) {
+                    if (node.colors && Array.isArray(node.colors) && node.colors.length > 0) {
                         // Lookup the index of the class to cross ref into color table
                         bboxColor = node.colors[detectedObject.classIndex];
                     }
@@ -561,22 +562,22 @@ module.exports = function (RED) {
                 });
 
                 msg.executionTimes.drawing = getDuration();
-                
+
                 // Convert the annotated image (from the PureImage canvas) to an rgba tensor
                 var annotatedImageTensor = tf.tensor3d(pimg.data, [imageHeight, imageWidth, 4], 'int32');
-                
+
                 // TODO the output image format (jpeg, raw, ...) should be adjustable in the config screen
-                
+
                 // The encodeJpeg does not support an alpha channel, so convert the annotated image tensor from RGBA to RGB
                 rgbTensor = rgba2rgb(annotatedImageTensor);
-                
+
                 // Override the original image tensor by the one containing the bounding box drawings
                 tf.dispose(imageTensor);
                 imageTensor = rgbTensor;
 
                 msg.executionTimes.rgba_to_rgb = getDuration();
             }
-                
+
             // ---------------------------------------------------------------------------------------------------------
             // 6. Encode the raw (annotated) image to JPEG
             // ---------------------------------------------------------------------------------------------------------
@@ -586,12 +587,13 @@ module.exports = function (RED) {
             if (node.passthru === "true") {
                 msg.image.data = inputImage;
                 // TODO use https://www.npmjs.com/package/image-type to determine msg.image.type
+                // Surely we only support jpeg ? as the actual image type ? (or rather tfjs does ?)
             }
             else {
-                if(node.outputFormat == "jpg") {
+                if (node.outputFormat == "jpg") {
                     // Encode the RGB tensor to a JPEG image
                     var jpeg = await tf.node.encodeJpeg(imageTensor);
-                    
+
                     // Convert the jpeg image from Uint8Array to a buffer
                     msg.image.data = Buffer.from(jpeg);
                     msg.image.type = "jpg";
@@ -604,7 +606,7 @@ module.exports = function (RED) {
                     msg.image.type = "raw"; // TODO: real mime type?
                 }
             }
-            
+
             msg.image.width = imageWidth;
             msg.image.height = imageHeight
 
@@ -612,7 +614,6 @@ module.exports = function (RED) {
 
             // Cleanup all tensors, to avoid memory leakage
             tf.dispose([annotatedImageTensor, rgbaTensor]);
-
             tf.dispose(imageTensor);
 
             // Calculate the total execution time
@@ -627,6 +628,14 @@ module.exports = function (RED) {
         node.on('input', function (msg) {
             try {
                 if (node.ready) {
+                    // Allow replacing the labels array dynamically - either as an array or a csv string
+                    // If any labels are missing from the array then don't report/draw boxes later
+                    // If any colors are missing from the array then just use the default (magenta) later
+                    if (Array.isArray(msg.labels)) { node.labels = msg.labels; }
+                    if (typeof msg.labels === "string") { node.labels = msg.labels.split(','); }
+                    if (Array.isArray(msg.colors)) { node.colors = msg.colors; }
+                    if (typeof msg.colors === "string") { node.colors = msg.colors.split(','); }
+
                     if (typeof msg.payload === "string") {
                         if (msg.payload.startsWith("http")) {
                             getImage(msg);
@@ -637,12 +646,6 @@ module.exports = function (RED) {
                         }
                         else { msg.payload = fs.readFileSync(msg.payload); }
                     }
-                    // Allow replacing the labels array dynamically - either as an array or a csv string
-                    // Also if any are missing from the array then don't report/draw boxes later
-                    if (Array.isArray(msg.labels)) { node.labels = msg.labels; }
-                    if (typeof msg.labels === "string") { node.labels = msg.labels.split(','); }
-                    if (Array.isArray(msg.colors)) { node.colors = msg.colors; }
-                    if (typeof msg.colors === "string") { node.colors = msg.colors.split(','); }
                     if (msg.payload) {
                         handleMsg(msg);
                     }

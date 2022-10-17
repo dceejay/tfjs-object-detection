@@ -22,11 +22,11 @@
             <option value="bbox">Annotated Image</option>
         </select>
     </div>
-    <div class="form-row">
+    <div class="form-row" id="node-outputFormat">
         <label for="node-input-outputFormat"><i class="fa fa-picture-o"></i> Output format</label>
         <select type="text" id="node-input-outputFormat" style="width:70%;">
-            <option value="raw">Raw</option>
             <option value="jpg">JPEG</option>
+            <option value="raw">Raw</option>
         </select>
     </div>
     <div class="form-row" id="node-bbox-color">
@@ -80,7 +80,7 @@
             scoreThreshold: { value: 0.8 },
             passthru: { value: "false" },
             lineColor: { value: "#FF00FF" }, // Magenta
-            outputFormat: { value: "jpg" } 
+            outputFormat: { value: "jpg" }
         },
         inputs: 1,
         outputs: 1,
@@ -90,18 +90,21 @@
         label: function() {
             return this.name || "tf object detect";
         },
+        labelStyle: function() {
+            return this.name?"node_label_italic":"";
+        },
         oneditprepare: function() {
             var node = this;
 
             function createConfigNode(name, options) {
                 var id = RED.nodes.id();
-            
+
                 // Create a new config node
                 var newConfig = {
                     id: id,
                     _def: RED.nodes.getType("tensorflowObjDetConfig"),
                     type: "tensorflowObjDetConfig",
-                    hasUsers: false, 
+                    hasUsers: false,
                     users: [],
                     name: name,
                     label: function() { return this.name || name}
@@ -112,7 +115,6 @@
                 }
 
                 RED.nodes.add(newConfig);
-                
                 return newConfig;
             }
 debugger
@@ -201,7 +203,7 @@ debugger
                         text: defaultConfigNode.name
                     }));
                 });
-                
+
                 // Make sure the "Coco SSD Tfjs" is selected by default.
                 // Otherwise they would only be displayed in the list, the next time this config screen is being openened.
                 // TODO check why this doesn't work
@@ -213,9 +215,11 @@ debugger
             }
             $("#node-input-passthru").change( function() {
                 if ($("#node-input-passthru").val() === "bbox") {
+                    $("#node-outputFormat").show();
                     $("#node-bbox-color").show();
                 }
                 else {
+                    $("#node-outputFormat").hide();
                     $("#node-bbox-color").hide();
                 }
             });

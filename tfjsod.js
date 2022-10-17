@@ -199,6 +199,7 @@ module.exports = function (RED) {
                 break;
 
             case "graph":
+                // console.log("URL:",modelUrl)
                 tf.loadGraphModel(modelUrl).then(model => {
                     node.model = model;
                     node.ready = true;

@@ -13,6 +13,12 @@
         <label for="node-input-scoreThreshold"><i class="fa fa-signal"></i> Threshold</label>
         <input type="number" id="node-input-scoreThreshold" placeholder="e.g. 0 - 1" min="0" max="1" step="0.1">
     </div>
+    <div class="form-row" id="node-inputFormat">
+        <label for="node-input-outputFormat"><i class="fa fa-picture-o"></i> Input format</label>
+        <select type="text" id="node-input-inputFormat" style="width:70%;">
+            <option value="jpg">JPEG</option>
+            <option value="raw">Raw</option>
+        </select>
     </div>
     <div class="form-row">
         <label for="node-input-passthru"><i class="fa fa-picture-o"></i> Passthru</label>
@@ -78,6 +84,7 @@
             name: { value: "" },
             tensorflowConfig: {value:"", type: "tensorflowObjDetConfig"},
             scoreThreshold: { value: 0.8 },
+            inputFormat: { value: "jpg" },
             passthru: { value: "false" },
             lineColor: { value: "#FF00FF" }, // Magenta
             outputFormat: { value: "jpg" }

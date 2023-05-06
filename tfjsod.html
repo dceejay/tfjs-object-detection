@@ -1,41 +1,98 @@
 <script type="text/html" data-template-name="tensorflowObjDet">
     <div class="form-row">
-        <label for="node-input-tensorflowConfig"><i class="fa fa-cog"></i> Model</label>
-        <!-- Node-Red will replace this input element by a drop-down (with available Tfjs configurations) -->
-        <input type="text" id="node-input-tensorflowConfig">
-    </div>
-    <div class="form-row">
-        <label>&nbsp;</label>
-        <button id="node-input-generateConfigNodes"><i class="fa fa-plus-circle"></i> Generate default config nodes</button>
-    </div>
-    <br>
-    <div class="form-row">
-        <label for="node-input-scoreThreshold"><i class="fa fa-signal"></i> Threshold</label>
-        <input type="number" id="node-input-scoreThreshold" placeholder="e.g. 0 - 1" min="0" max="1" step="0.1">
-    </div>
-    </div>
-    <div class="form-row">
-        <label for="node-input-passthru"><i class="fa fa-picture-o"></i> Passthru</label>
-        <select type="text" id="node-input-passthru" style="width:70%;">
-            <option value="false">Nothing</option>
-            <option value="true">Original Image</option>
-            <option value="bbox">Annotated Image</option>
-        </select>
-    </div>
-    <div class="form-row" id="node-outputFormat">
-        <label for="node-input-outputFormat"><i class="fa fa-picture-o"></i> Output format</label>
-        <select type="text" id="node-input-outputFormat" style="width:70%;">
-            <option value="jpg">JPEG</option>
-            <option value="raw">Raw</option>
-        </select>
-    </div>
-    <div class="form-row" id="node-bbox-color">
-        <label for="node-input-lineColor"><i class="fa fa-paint-brush "></i> Box color</label>
-        <input type="color" id="node-input-lineColor" placeholder="HTML5 color or #rrggbb">
-    </div>
-    <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+    <div class="form-row">
+        <!-- Tabsheets -->
+        <ul style="background: #fff; min-width: 600px; margin-bottom: 20px;" id="node-tfjsod-tabs"></ul>
+    </div>
+    <div id="node-tfjsod-tabs-content" style="min-height: 150px">
+        <!-- Content of all tabsheets -->
+        <div id="node-tfjsod-tab-general">
+            <div class="form-row">
+                <label for="node-input-tensorflowConfig"><i class="fa fa-cog"></i> Model</label>
+                <!-- Node-Red will replace this input element by a drop-down (with available Tfjs configurations) -->
+                <input type="text" id="node-input-tensorflowConfig">
+            </div>
+            <div class="form-row">
+                <label>&nbsp;</label>
+                <button id="node-input-generateConfigNodes"><i class="fa fa-plus-circle"></i> Generate default config nodes</button>
+            </div>
+            <div class="form-row" id="node-inputFormat">
+                <label for="node-input-outputFormat"><i class="fa fa-picture-o"></i> Input format</label>
+                <select type="text" id="node-input-inputFormat" style="width:70%;">
+                    <option value="jpg">JPEG</option>
+                    <option value="raw">Raw</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label for="node-input-passthru"><i class="fa fa-picture-o"></i> Passthru</label>
+                <select type="text" id="node-input-passthru" style="width:70%;">
+                    <option value="none">Nothing</option>
+                    <option value="orig">Original Image</option>
+                    <option value="bbox">Annotated Image</option>
+                </select>
+            </div>
+            <div class="form-row" id="node-annotation">
+                <label for="node-input-annotationExpression"><i class="fa fa-picture-o"></i> Annotation</label>
+                <input type="text" id="node-input-annotationExpression">
+            </div>
+            <div class="form-row" id="node-bbox-padding">
+                <label for="node-input-bboxPadding"><i class="fa fa-window-close-o"></i> Padding</label>
+                <input type="number" id="node-input-bboxPadding" min="0">
+            </div>
+            <div class="form-row" id="node-outputFormat">
+                <label for="node-input-outputFormat"><i class="fa fa-picture-o"></i> Output format</label>
+                <select type="text" id="node-input-outputFormat" style="width:70%;">
+                    <option value="jpg">JPEG</option>
+                    <option value="raw">Raw</option>
+                </select>
+            </div>
+            <div class="form-row" id="node-bbox-color">
+                <label for="node-input-lineColor"><i class="fa fa-paint-brush "></i> Box color</label>
+                <input type="color" id="node-input-lineColor" placeholder="HTML5 color or #rrggbb">
+            </div>
+        </div>
+        <div id="node-tfjsod-tab-filters">
+            <div class="form-row">
+                <label for="node-input-minimumScore"><i class="fa fa-signal"></i> Min. score</label>
+                <input type="number" id="node-input-minimumScore" placeholder="e.g. 0 - 1" min="0" max="1" step="0.1">
+            </div>
+            <div class="form-row">
+                <label for="node-input-minimumWidth"><i class="fa fa-arrows-h"></i> Min. width</label>
+                <input type="number" id="node-input-minimumWidth" min="0">
+            </div>
+            <div class="form-row">
+                <label for="node-input-maximumWidth"><i class="fa fa-arrows-h"></i> Max. width</label>
+                <input type="number" id="node-input-maximumWidth" min="0">
+            </div>
+            <div class="form-row">
+                <label for="node-input-minimumHeight"><i class="fa fa-arrows-v"></i> Min. height</label>
+                <input type="number" id="node-input-minimumHeight" min="0">
+            </div>
+            <div class="form-row">
+                <label for="node-input-maximumHeight"><i class="fa fa-arrows-v"></i> Max. height</label>
+                <input type="number" id="node-input-maximumHeight" min="0">
+            </div>
+            <div class="form-row">
+                <label for="node-input-minimumAspectRatio"><i class="fa fa-arrows"></i> Min. aspect ratio</label>
+                <input type="number" id="node-input-minimumAspectRatio" min="0">
+            </div>
+            <div class="form-row">
+                <label for="node-input-maximumAspectRatio"><i class="fa fa-arrows"></i> Max. aspect ratio</label>
+                <input type="number" id="node-input-maximumAspectRatio" min="0">
+            </div>
+            <div class="form-row">
+                <label for="node-input-maximumDetections"><i class="fa fa-level-down "></i> Max. detections</label>
+                <input type="number" id="node-input-maximumDetections" min="1">
+            </div>
+            <div class="form-row">
+                <label for="node-input-classFilter"><i class="fa fa-filter"></i> Classes</label>
+                <input type="text" id="node-input-classFilter" style="width:70%;">
+                <input id="node-input-classFilterType" type="hidden">
+            </div>
+        </div>
     </div>
 </script>
 
@@ -45,8 +102,8 @@
     <dl class="message-properties">
         <dt>payload <span class="property-type">buffer | string</span></dt>
         <dd>A binary buffer of a jpeg image, or string of a filename to load.</dd>
-        <dt>scoreThreshold <span class="property-type">number</span></dt>
-        <dd>Minimum threshold for a valid detection (0 - 1)</dd>
+        <dt>minimumScore <span class="property-type">number</span></dt>
+        <dd>Minimum score for a valid detection (0 - 1)</dd>
     </dl>
     <h3>Outputs</h3>
     <dl class="message-properties">
@@ -60,15 +117,15 @@
         <dd>an object with each class and their counts, e.g. <code>{dog:3,cat:1}</code>.</dd>
         <dt>shape <span class="property-type">array[3]</span></dt>
         <dd>dimensions of the input image, [x,y,depth].</dd>
-        <dt>scoreThreshold <span class="property-type">number</span></dt>
-        <dd>the scoreThreshold value used in this detection.</dd>
+        <dt>minimumScore <span class="property-type">number</span></dt>
+        <dd>the minimumScore value used in this detection.</dd>
         <dt>image <span class="property-type">buffer</span></dt>
         <dd>(optional) either the original image, or
         the image annotated with detected bounding boxes.</dd>
     </dl>
     <h3>Details</h3>
-    <p>The configured scoreThreshold can be overridden dynamically
-        by setting the <code>msg.scoreThreshold</code> property.</p>
+    <p>The configured minimumScore can be overridden dynamically
+        by setting the <code>msg.minimumScore</code> property.</p>
 </script>
 
 <script type="text/javascript">
@@ -77,8 +134,19 @@
         defaults: {
             name: { value: "" },
             tensorflowConfig: {value:"", type: "tensorflowObjDetConfig"},
-            scoreThreshold: { value: 0.8 },
-            passthru: { value: "false" },
+            minimumScore: { value: null },
+            minimumHeight: { value: null },
+            maximumHeight: { value: null },
+            minimumWidth: { value: null },
+            maximumWidth: { value: null },
+            minimumAspectRatio: { value: null },
+            maximumAspectRatio: { value: null },
+            maximumDetections: { value: null },
+            classFilter: { value: [] },
+            inputFormat: { value: "jpg" },
+            passthru: { value: "none" },
+            annotationExpression: { value: "{{class}}({{scorePercentage}})" },
+            bboxPadding: { value: 0 },
             lineColor: { value: "#FF00FF" }, // Magenta
             outputFormat: { value: "jpg" }
         },
@@ -217,12 +285,43 @@ debugger
                 if ($("#node-input-passthru").val() === "bbox") {
                     $("#node-outputFormat").show();
                     $("#node-bbox-color").show();
+                    $("#node-annotation").show();
+                    $("#node-bbox-padding").show();
                 }
                 else {
                     $("#node-outputFormat").hide();
                     $("#node-bbox-color").hide();
+                    $("#node-annotation").hide();
+                    $("#node-bbox-padding").hide();
                 }
             });
+            
+            $("#node-input-classFilter").typedInput({
+                default: 'json',
+                typeField: $("#node-input-classFilterType"),
+                types:['json']
+            });
+            //$("#node-input-classFilterType").typedInput('type', node.classFilterType);
+debugger;
+            // Show tabsheets
+            node.tabs = RED.tabs.create({
+                id: "node-tfjsod-tabs",
+                onchange: function(tab) {
+                    // Show only the content (i.e. the children) of the selected tabsheet, and hide the others
+                    $("#node-tfjsod-tabs-content").children().hide();
+                    $("#" + tab.id).show();
+                }
+            });
+            node.tabs.addTab({
+                id: "node-tfjsod-tab-general",
+                label: "General"
+            });
+            node.tabs.addTab({
+                id: "node-tfjsod-tab-filters",
+                label: "Filters"
+            })
+            
+            // TODO annotation expression field should only be visible if annotated image is output type
         }
     });
 </script>

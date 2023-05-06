@@ -1,6 +1,6 @@
 
 module.exports = function (RED) {
-    function TensorFlowObjDet(n) {
+    function TensorFlowObjDet(config) {
         var fs = require('fs');
         var path = require('path');
         var express = require("express");
@@ -15,21 +15,39 @@ module.exports = function (RED) {
         global.fetch = nodeFetch; // <<--- ADD
         /* ************************************************************** */
 
-        RED.nodes.createNode(this, n);
-        this.scoreThreshold = n.scoreThreshold;
-        this.maxDetections = n.maxDetections;
-        this.inputFormat = n.inputFormat;
-        this.passthru = n.passthru || "false";
-        this.outputFormat = n.outputFormat;
-        this.lineColor = n.lineColor || "magenta";
+        RED.nodes.createNode(this, config);
+        this.minimumScore = parseFloat(config.minimumScore || 0);
+        this.classFilter = config.classFilter || "[]";
+        this.classFilterType = config.classFilterType;
+        this.minimumHeight = parseInt(config.minimumHeight || 0);
+        this.maximumHeight = parseInt(config.maximumHeight || Number.MAX_SAFE_INTEGER);
+        this.minimumWidth = parseInt(config.minimumWidth || 0);
+        this.maximumWidth = parseInt(config.maximumWidth || Number.MAX_SAFE_INTEGER);
+        this.minimumAspectRatio = parseFloat(config.minimumAspectRatio || 0);
+        this.maximumAspectRatio = parseFloat(config.maximumAspectRatio || Number.MAX_SAFE_INTEGER);
+        this.maximumDetections = parseInt(config.maximumDetections || Number.MAX_SAFE_INTEGER);
+        this.inputFormat = config.inputFormat;
+        this.passthru = config.passthru || "none";
+        this.annotationExpression = config.annotationExpression;
+        this.bboxPadding = parseInt(config.bboxPadding || 0);
+        this.outputFormat = config.outputFormat;
+        this.lineColor = config.lineColor || "magenta";
         this.colors = [];
-        this.tensorflowConfig = n.tensorflowConfig;
+        this.tensorflowConfig = config.tensorflowConfig;
         this.tensorflowConfigNode = null;
         this.model = null;
         this.busy = false;
         this.skippedMsgCount = 0;
 
         var node = this;
+        
+        try {
+            // The config contains the array as a string (e.g. '["person", "car"]')
+            node.classFilter = JSON.parse(node.classFilter);
+        }
+        catch(err) {
+            node.warn("The 'class' filter property should contain an array of strings, e.g. [\"person\", \"car\"]");
+        }
 
         if (node.tensorflowConfig) {
             // Retrieve the config node, where the model is configured
@@ -219,13 +237,13 @@ module.exports = function (RED) {
                     break;
 
                 case "graph":
-                // console.log("URL:",modelUrl)
-                tf.loadGraphModel(modelUrl).then(model => {
-                    modelLoaded("Graph", model);
-                }).catch(err => {
-                    node.status({fill:'red', shape:'ring', text:'Failed to load model'});
-                    node.error("Can't load graph model: " + err);
-                });
+                    // console.log("URL:",modelUrl)
+                    tf.loadGraphModel(modelUrl).then(model => {
+                        modelLoaded("Graph", model);
+                    }).catch(err => {
+                        node.status({fill:'red', shape:'ring', text:'Failed to load model'});
+                        node.error("Can't load graph model: " + err);
+                    });
 
                 break;
             }
@@ -279,6 +297,33 @@ module.exports = function (RED) {
         }
 
         async function handleMsg(msg) {
+            // The input message can contain a number of settings that overrule the node settings.
+            // Note: don't simple use || because otherwise all 0 values in the msg will ignored...
+            if (!msg.hasOwnProperty("minimumScore")) {
+                msg.minimumScore = node.minimumScore;
+            }
+            if (!msg.hasOwnProperty("minimumHeight")) {
+                msg.minimumHeight = node.minimumHeight;
+            }
+            if (!msg.hasOwnProperty("maximumHeight")) {
+                msg.maximumHeight = node.maximumHeight;
+            }
+            if (!msg.hasOwnProperty("minimumWidth")) {
+                msg.minimumWidth = node.minimumWidth;
+            }
+            if (!msg.hasOwnProperty("maximumWidth")) {
+                msg.maximumWidth = node.maximumWidth;
+            }
+            if (!msg.hasOwnProperty("maximumDetections")) {
+                msg.maximumDetections = node.maximumDetections;
+            }
+            if (!msg.hasOwnProperty("minimumAspectRatio")) {
+                msg.minimumAspectRatio = node.minimumAspectRatio;
+            }
+            if (!msg.hasOwnProperty("maximumAspectRatio")) {
+                msg.maximumAspectRatio = node.maximumAspectRatio;
+            }
+
             // Start a new execution context for TensorFlow.js, to manage the lifecycle of tensors and other resources.
             // When a new scope is started, any tensors that are created within that scope will be tracked until the scope is ended.
             // Note that we use this instead of tf.tidy, because we had memory leaks when putting the below code in an async function.
@@ -288,8 +333,7 @@ module.exports = function (RED) {
 
             try {
                 msg.executionTimes = {};
-                msg.maxDetections = msg.maxDetections || node.maxDetections || 40;
-                
+
                 // ---------------------------------------------------------------------------------------------------------
                 // 1. Decode the input image (to raw pixels) if it is type 'jpeg'
                 // ---------------------------------------------------------------------------------------------------------
@@ -332,38 +376,41 @@ module.exports = function (RED) {
                 // Normally the batch size is used to train the model with a batch of N images.
                 // However for object detection there will only be 1 image involved, so the batch size will need to be 1.
                 // Otherwise the prediction will throw an exception: "Input tensor shape mismatch: expect '1,300,300,3', got '300,300,3'"
-                if (imageTensor.shape.length == 3 && node.modelInputMetadata.shape.length == 4) {
-                    let expandedImageTensor = tf.expandDims(imageTensor, 0);
-                    imageTensor = expandedImageTensor;
+                if (node.tensorflowConfigNode.runtime !== "tfjs") {
+                    if (imageTensor.shape.length == 3 && node.modelInputMetadata.shape.length == 4) {
+                        let expandedImageTensor = tf.expandDims(imageTensor, 0);
+                        imageTensor = expandedImageTensor;
+                    }
                 }
-
-                // Get the image size expected by the model, which corresponds to the size of the images that have been used to train the model.
-                // These dimensions are stored in the model shape tensor, which contains the following information: [batchsize, height, width, colorCount]
-                let requiredModelDimensions = getImageDimensions(node.modelInputMetadata.shape);
-                modelWidth = requiredModelDimensions.width;
-                modelHeight = requiredModelDimensions.height;
 
                 // Get the dimensions of the input image
                 let inputImageDimensions = getImageDimensions(imageTensor.shape);
-                imageWidth = inputImageDimensions.width;
-                imageHeight = inputImageDimensions.height;
 
-                // Preprocessing is NOT required for runtime type 'tfjs', because the tfjs model has the image preprocessing code inside the tfjs model
-                if (node.tensorflowConfigNode.runtime !== "tfjs") {
+                // Get the image size expected by the model, which corresponds to the size of the images that have been used to train the model.
+                // These dimensions are stored in the model shape tensor, which contains the following information: [batchsize, height, width, colorCount].
+                let requiredModelDimensions = getImageDimensions(node.modelInputMetadata.shape);
+
+                if (requiredModelDimensions.height == -1 && requiredModelDimensions.width == -1) {
+                    // A fully convolutional model processes the input image using a series of convolutional layers, that can work with images of any size.
+                    // For example the Tensorflow Coco SSD model doesn't need to know the exact width and height of the input image, so it requires width and height -1.
+                    // Instead, the model learns to detect objects based on patterns in the feature maps, which are independent of the input size.
+                    // Therefore we skip the resizing...
+                }
+                else {
                     // Resize the input image if it's dimensions don't match with the model requirement
-                    if (imageHeight != modelHeight || imageWidth != modelWidth) {
+                    if (inputImageDimensions.height != requiredModelDimensions.height || inputImageDimensions.width != requiredModelDimensions.width) {
                         let resizedImageTensor;
 
                         // Otherwise the prediction will throw an exception.  For example: Input tensor shape mismatch: expect '1,300,300,3', got '1,480,640,3'.
                         switch(node.tensorflowConfigNode.resizeAlgorithm) {
                             case "bilinear":
                                 // The 'bilinear' algorithm offers smooth transitions.
-                                resizedImageTensor = tf.image.resizeBilinear(imageTensor, [modelWidth, modelHeight]);
+                                resizedImageTensor = tf.image.resizeBilinear(imageTensor, [requiredModelDimensions.width, modelHeight]);
                                 imageTensor = resizedImageTensor;
                                 break;
                             case "neirest":
                                 // The 'neirest neighbour' algorithm is the fastest one (which still delivers enough accuracy).
-                                resizedImageTensor = tf.image.resizeNearestNeighbor(imageTensor, [modelHeight, modelWidth]);
+                                resizedImageTensor = tf.image.resizeNearestNeighbor(imageTensor, [requiredModelDimensions.height, requiredModelDimensions.width]);
                                 imageTensor = resizedImageTensor;
                                 break;
                         }
@@ -390,7 +437,7 @@ module.exports = function (RED) {
                         // Which means the input is an image, and the output is bboxes/scores/...
                         // This in contradiction to the other models (TfLite, Graph, ...), where all input/output processing needs to be done by this node.
                         // TODO don't use await to avoid uncaught exceptions
-                        detectionResult = await node.model.detect(imageTensor, msg.maxDetections);
+                        detectionResult = await node.model.detect(imageTensor, msg.maximumDetections);
                         break;
                     case "tflite":
                         // It is NOT required to normalize the input images (i.e. from values in the range [0, 255] to [0,1]).
@@ -415,9 +462,7 @@ module.exports = function (RED) {
                 // 4. Parse the object detection output (tensors)
                 // ---------------------------------------------------------------------------------------------------------
 
-                msg.shape = imageTensor.shape.slice(); // Clone the shape (array)
                 msg.classes = {};
-                msg.scoreThreshold = msg.scoreThreshold || node.scoreThreshold || 0.5;
 
                 // Postprocessing is NOT required for runtime type 'tfjs', because the tfjs model has the postprocessing code inside the tfjs model
                 if (node.tensorflowConfigNode.runtime === "tfjs") {
@@ -432,93 +477,128 @@ module.exports = function (RED) {
                     let scores      = getOutputProperty(detectionResult, "scores"      , node.tensorflowConfigNode.scoreProperty, node.tensorflowConfigNode.scorePropertyType);
                     let objectCount = getOutputProperty(detectionResult, "object count", node.tensorflowConfigNode.countProperty, node.tensorflowConfigNode.countPropertyType);
 
+                    // Convert the 3 arrays to a single array (containing 3 properties), similar to the tfjs models
                     for(let i = 0; i < objectCount; i++) {
-                        let score = scores[i];
-                        if (score >= node.scoreThreshold) { // only report those above our cutoff score
-                            let classIndex = classes[i];
-                            const clazz = node.labels[classIndex];
-                            // only report those that we have in the labels array.
-                            if (clazz) {
-                                // The normalized bbox has the format [ymin, xmin, ymax, xmax]
-                                let normalizedBbox = bboxes[i];
-                                let x1, y1, x2, y2;
+                        // The normalized bbox has the format [ymin, xmin, ymax, xmax]
+                        let normalizedBbox = bboxes[i];
+                        let x1, y1, x2, y2;
 
-                                // Determine the bbox upper-left and lower-right corner points, based on the specified model output bbox format
-                                switch(node.tensorflowConfigNode.bboxFormat) {
-                                case "[x1,y1,x2,y2]":
-                                    x1 = normalizedBbox[0];
-                                    y1 = normalizedBbox[1];
-                                    x2 = normalizedBbox[2];
-                                    y2 = normalizedBbox[3];
-                                    break;
-                                case "[y1,x1,y2,x2]":
-                                    x1 = normalizedBbox[1];
-                                    y1 = normalizedBbox[0];
-                                    x2 = normalizedBbox[3];
-                                    y2 = normalizedBbox[2];
-                                    break;
-                                case "[x1,y1,w,h]":
-                                    x1 = normalizedBbox[0];
-                                    y1 = normalizedBbox[1];
-                                    x2 = normalizedBbox[2] - normalizedBbox[0];
-                                    y2 = normalizedBbox[3] - normalizedBbox[1];
-                                    break;
-                                case "[y1,x1,h,w]":
-                                    x1 = normalizedBbox[1];
-                                    y1 = normalizedBbox[0];
-                                    x2 = normalizedBbox[3] - normalizedBbox[1];
-                                    y2 = normalizedBbox[2] - normalizedBbox[0];
-                                    break;
-                                }
-
-                                // Denormalization can be executed by multiplying with the image width and height.
-                                // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
-                                x1 *= imageWidth;
-                                x2 *= imageWidth;
-                                y1 *= imageHeight;
-                                y2 *= imageHeight;
-
-                                // The detection result can contain coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
-                                x1 = Math.max(0, x1);
-                                y1 = Math.max(0, y1);
-                                x2 = Math.min(imageWidth, x2);
-                                y2 = Math.min(imageHeight, y2);
-
-                                // Calculate the bbox dimensions
-                                let width = Math.abs(x2 - x1);
-                                let height = Math.abs(y2 - y1);
-
-                                // For all runtime types we will send the bbox in the format [x_min, y_min, width, height]
-                                let denormalizedBbox = [x1, y1, width, height];
-
-                                msg.payload.push({
-                                    classIndex: classIndex,
-                                    class: node.labels[classIndex],
-                                    bbox: denormalizedBbox,
-                                    score: scores[i]
-                                })
-                            }
+                        // Determine the bbox upper-left (x1,y1) and lower-right corner (x2,y2) points, based on the specified model output bbox format
+                        switch(node.tensorflowConfigNode.bboxFormat) {
+                        case "[x1,y1,x2,y2]":
+                            x1 = normalizedBbox[0];
+                            y1 = normalizedBbox[1];
+                            x2 = normalizedBbox[2];
+                            y2 = normalizedBbox[3];
+                            break;
+                        case "[y1,x1,y2,x2]":
+                            x1 = normalizedBbox[1];
+                            y1 = normalizedBbox[0];
+                            x2 = normalizedBbox[3];
+                            y2 = normalizedBbox[2];
+                            break;
+                        case "[x1,y1,w,h]":
+                            x1 = normalizedBbox[0];
+                            y1 = normalizedBbox[1];
+                            x2 = normalizedBbox[2] - normalizedBbox[0];
+                            y2 = normalizedBbox[3] - normalizedBbox[1];
+                            break;
+                        case "[y1,x1,h,w]":
+                            x1 = normalizedBbox[1];
+                            y1 = normalizedBbox[0];
+                            x2 = normalizedBbox[3] - normalizedBbox[1];
+                            y2 = normalizedBbox[2] - normalizedBbox[0];
+                            break;
                         }
+
+                        // Denormalization can be executed by multiplying with the image width and height.
+                        // The advantage of normalized bounding boxes, is that it fits both the resized and original images (which is send in the output msg).
+                        x1 *= inputImageDimensions.width;
+                        x2 *= inputImageDimensions.width;
+                        y1 *= inputImageDimensions.height;
+                        y2 *= inputImageDimensions.height;
+
+                        // The detection result can contain coordinates outside of the image dimensions, so force them to be withing the image (via min and max).
+                        x1 = Math.max(0, x1);
+                        y1 = Math.max(0, y1);
+                        x2 = Math.min(inputImageDimensions.width, x2);
+                        y2 = Math.min(inputImageDimensions.height, y2);
+
+                        let width = Math.abs(x2 - x1);
+                        let height = Math.abs(y2 - y1);
+
+                        // For all runtime types we will send the bbox in the format [x_min, y_min, width, height]
+                        let denormalizedBbox = [x1, y1, width, height];
+            
+                        // The info for 1 detected object is spread across 3 separate arrays
+                        msg.payload.push({
+                            bbox: denormalizedBbox,
+                            classIndex: classes[i],
+                            class: node.labels[classes[i]],
+                            score: scores[i]
+                        });
                     }
                 }
 
-                // TODO add filtering based on minimum and maximum bbox size.
+                // Store the bbox dimensions in the output
+                msg.payload.forEach(function(detectedObject, index) {
+                    let width = detectedObject.bbox[2];
+                    let height = detectedObject.bbox[3];
 
-                // Sort the array so we get highest scores, to make sure the highest scores are preserved in case the array length is trimmed afterward
-                msg.payload.sort((a, b) => (a.score < b.score) ? 1 : -1)
-
-                for (let j=0; j < Math.min(msg.payload.length, msg.maxDetections); j++) {
-                    // TODO use a reduce function for this
-                    if (msg.payload[j].score < msg.scoreThreshold) {
-                        msg.payload.splice(j,1);
-                        j = j - 1;
+                    detectedObject.size = {
+                        width: width,
+                        height: height,
+                        aspectRatio: width / height
                     }
+                })
 
-                    // TODO in a separate loop??
+                // ---------------------------------------------------------------------------------------------------------
+                // 5. Filter out unwanted detected objects
+                // ---------------------------------------------------------------------------------------------------------
+
+                // Sort the filtered array of detected objects (by descending score).
+                // Because that is easier for next nodes in the flow to get the top-N detections.
+                // And it also makes sure we keep below the detections with the highest scores, in case a maximum number of detections has been specified.
+                msg.payload.sort((a, b) => (a.score < b.score) ? 1 : -1);
+
+                // When a maximum number of detections has been specified, then filter out all other detections that we don't need
+                if (msg.maximumDetections < msg.payload.length) {
+                    msg.payload = msg.payload.slice(0, msg.maximumDetections);
+                }
+
+                // Only keep detected objects whose score is at least equal to the minimum score
+                msg.payload = msg.payload.filter(function (detectedObject) {
+                    return detectedObject.score >= msg.minimumScore;
+                });
+
+                // Only keep detected objects whose class is in the class filter array (only if there is a non-empty class filter array)
+                msg.payload = msg.payload.filter(function (detectedObject) {
+                    return node.classFilter.length == 0 || node.classFilter.includes(detectedObject.class);
+                });
+
+                // Only keep detected objects whose bounding box that has the minimum required size
+                msg.payload = msg.payload.filter(function (detectedObject) {
+                    let width = detectedObject.size.width;
+                    let height = detectedObject.size.height;
+                    let aspectRatio = detectedObject.size.aspectRatio;
+
+                    return width >= msg.minimumWidth &&
+                           width <= msg.maximumWidth && 
+                           height >= msg.minimumHeight &&
+                           height <= msg.maximumHeight &&
+                           aspectRatio >= msg.minimumAspectRatio &&
+                           aspectRatio <= msg.maximumAspectRatio
+                });
+
+                // Count the number of (filtered) detections for each detected class (i.e. class statistics)
+                for (let j=0; j < msg.payload.length; j++) {
                     if (msg.payload[j] && msg.payload[j].hasOwnProperty("class")) {
                         msg.classes[msg.payload[j].class] = (msg.classes[msg.payload[j].class] || 0 ) + 1;
                     }
                 }
+
+                // Total number of detected objecdts in the output message
+                msg.detectionCount = msg.payload.length;
 
                 msg.executionTimes.parse_detection_result = getDuration();
                 
@@ -528,13 +608,11 @@ module.exports = function (RED) {
                 imageTensor = originalImageTensor;
 
                 // ---------------------------------------------------------------------------------------------------------
-                // 5. Draw the bounding boxes on top of the original non-resized raw image
+                // 6. Draw the bounding boxes on top of the original non-resized raw image
                 // ---------------------------------------------------------------------------------------------------------
 
                 if (node.passthru === "bbox") {
-                    let imageDimensions = getImageDimensions(imageTensor.shape);
-
-                    switch(imageDimensions.channels) {
+                    switch(inputImageDimensions.channels) {
                         case 3:
                             // When the image tensor contains RGB (i.e. 3 channels), a fourth alpha channel needs to be added.
                             // PureImage requires RGBA data to display inside it's canvas, so no RGB data is allowed.
@@ -546,11 +624,11 @@ module.exports = function (RED) {
                             switch (imageTensor.shape.length) {
                                 case 3:
                                     axis = 2;
-                                    alphaTensorShape = [imageDimensions.height, imageDimensions.width, 1];
+                                    alphaTensorShape = [inputImageDimensions.height, inputImageDimensions.width, 1];
                                     break;
                                 case 4:
                                     axis = 3;
-                                    alphaTensorShape = [1, imageDimensions.height, imageDimensions.width, 1];
+                                    alphaTensorShape = [1, inputImageDimensions.height, inputImageDimensions.width, 1];
                                     break;
                             }
 
@@ -589,16 +667,24 @@ module.exports = function (RED) {
                     }
 
                     // Create a new empty PureImage 2D canvas
-                    let pimg = pureimage.make(imageWidth, imageHeight);
+                    let pimg = pureimage.make(inputImageDimensions.width, inputImageDimensions.height);
                     let ctx = pimg.getContext('2d');
-                    let scale = parseInt((imageWidth + imageHeight) / 500 + 0.5);
+                    let scale = parseInt((inputImageDimensions.width + inputImageDimensions.height) / 500 + 0.5);
 
                     // Store the original non-resized raw image (which has been set aside already in the beginning) inside the PureImage 2D canvas
                     ctx.bitmap.data = new Uint8ClampedArray(rawImage);
 
+                    ctx.font = scale*8+"pt 'Source Sans Pro'";
+                    ctx.lineWidth = scale;
+                    ctx.lineJoin = 'bevel';
+                    ctx.textAlign = "center";
+                    
+                    // TODO determine the text height automatically (https://www.tutorialspoint.com/Measure-text-height-on-an-HTML5-canvas-element) -> measure performance impact first!!
+                    let textHeight = 15;
+
                     // Draw all the bounding boxes in the PureImage 2D canvas
                     msg.payload.forEach(function (detectedObject, index) {
-                        let bboxColor;
+                        let bboxColor, text;
 
                         if (node.colors && Array.isArray(node.colors) && node.colors.length > 0) {
                             // Lookup the index of the class to cross ref into color table
@@ -611,26 +697,60 @@ module.exports = function (RED) {
 
                         ctx.fillStyle = bboxColor;
                         ctx.strokeStyle = bboxColor;
-                        ctx.font = scale*8+"pt 'Source Sans Pro'";
-                        ctx.fillText(detectedObject.class, detectedObject.bbox[0] + 4, detectedObject.bbox[1] - 4)
-                        ctx.lineWidth = scale;
-                        ctx.lineJoin = 'bevel';
-                        ctx.rect(detectedObject.bbox[0], detectedObject.bbox[1], detectedObject.bbox[2], detectedObject.bbox[3]);
+                        
+                        // Correct the coordinates of the bbox upper left (x1,y1) and lower right (x2,y2), to take into account the specified padding
+                        let x1 = detectedObject.bbox[0] - node.bboxPadding;
+                        let y1 = detectedObject.bbox[1] - node.bboxPadding;
+                        let width = detectedObject.bbox[2] + 2 * node.bboxPadding;
+                        let height = detectedObject.bbox[3] + 2 * node.bboxPadding;
+                        
+                        // The padding can result in a bbox partly outside the image dimensions, so force it to be within the image (via min and max).
+                        x1 = Math.max(0, x1);
+                        y1 = Math.max(0, y1);
+                        width = Math.min(inputImageDimensions.width, width);
+                        height = Math.min(inputImageDimensions.height, height);
+
+                        if (node.annotationExpression && node.annotationExpression.trim() !== "") {
+                            let annotationExpression = node.annotationExpression;
+                            // Resolve all the variables in the annotation expression
+                            annotationExpression = annotationExpression.replaceAll("{{class}}", detectedObject.class);
+                            annotationExpression = annotationExpression.replaceAll("{{score}}", detectedObject.score.toFixed(2)); // Score rounded to 2 decimals
+                            annotationExpression = annotationExpression.replaceAll("{{scorePercentage}}", Math.round(detectedObject.score * 100)); // Score rounded to 2 decimals
+                            annotationExpression = annotationExpression.replaceAll("{{width}}", Math.round(detectedObject.size.width));
+                            annotationExpression = annotationExpression.replaceAll("{{height}}", Math.round(detectedObject.size.height));
+                            annotationExpression = annotationExpression.replaceAll("{{aspectRatio}}", detectedObject.size.aspectRatio.toFixed(2));
+                            annotationExpression = annotationExpression.replaceAll("{{index}}", index);
+
+                            // Support multiline text
+                            // TODO check where the escaping (i.e. the second slash) is coming from
+                            let texts = annotationExpression.split('\\n');
+
+                            // Draw the texts above the bounding box
+                            texts.reverse().forEach(function (text, index) {
+                                let text_x = x1 + width/2;
+                                let text_y = y1 - 4 - textHeight*index;
+                                ctx.fillText(text, text_x, text_y);
+                            })
+                        }
+
+                        // Draw the bounding box (corrected with padding)
+                        ctx.rect(x1, y1, width, height);
                         ctx.stroke();
                     });
 
                     // Convert the annotated image (from the PureImage canvas) - containing the bounding boxex - to a tensor
-                    let annotatedImageTensor = tf.tensor3d(pimg.data, [imageHeight, imageWidth, 4], 'int32');
+                    let annotatedImageTensor = tf.tensor3d(pimg.data, [inputImageDimensions.height, inputImageDimensions.width, 4], 'int32');
                     imageTensor = annotatedImageTensor;
 
                     msg.executionTimes.bbox_drawing = getDuration();
                 }
 
                 // ---------------------------------------------------------------------------------------------------------
-                // 6. Add the image to the output message in the specified format
+                // 7. Add the image to the output message in the specified format
                 // ---------------------------------------------------------------------------------------------------------
 
-                if (node.passthru === "true") {
+                if (node.passthru === "orig") {
+                    // Pass the original input image to the output
                     msg.image = {
                         data: inputImage,
                         type: node.inputFormat
@@ -640,10 +760,11 @@ module.exports = function (RED) {
                     // Surely we only support jpeg ? as the actual image type ? (or rather tfjs does ?)
                 }
                 else {
-                    if (node.outputFormat == "jpg") { // TODO the output image format (jpeg, raw, ...) should be adjustable in the config screen
-                        let imageDimensions = getImageDimensions(imageTensor.shape);
+                    // Get the dimensions of the input image again (because the number of channels might have been changed by bbox drawing)
+                    inputImageDimensions = getImageDimensions(imageTensor.shape);
 
-                        switch(imageDimensions.channels) {
+                    if (node.outputFormat == "jpg") { // TODO the output image format (jpeg, raw, ...) should be adjustable in the config screen
+                        switch(inputImageDimensions.channels) {
                             case 3:
                                 // Seems that we are already dealing with an rgb tensor, so no conversion of the image tensor needed
                                 break;
@@ -668,29 +789,25 @@ module.exports = function (RED) {
                         }
                     }
                     else {
-                        let imageDimensions = getImageDimensions(imageTensor.shape);
-
                         // TODO test whether we should use dataSync i.e. a clone of the data before sending it to the next nodes in the flow
                         let imageArray = await imageTensor.data();
 
                         // Convert the raw image from Uint32Array to a buffer
                         msg.image = {
                             data: Buffer.from(imageArray),
-                            width: imageDimensions.width,
-                            height: imageDimensions.height,
-                            channels: imageDimensions.channels,
                             type: "raw" // TODO: real mime type?
                         }
                     }
                 }
-                
-                msg.image.width = imageWidth;
-                msg.image.height = imageHeight
+
+                msg.image.width = inputImageDimensions.width;
+                msg.image.height = inputImageDimensions.height;
+                msg.image.channels = inputImageDimensions.channels;
 
                 msg.executionTimes.encoding = getDuration();
 
                 // ---------------------------------------------------------------------------------------------------------
-                // 7. Statistics
+                // 8. Statistics
                 // ---------------------------------------------------------------------------------------------------------
 
                 // Get information about the memory usage 
@@ -756,7 +873,7 @@ module.exports = function (RED) {
             node.busy = false;
         }
 
-        node.on('input', async function (msg) {
+        node.on('input', function (msg) {
             // Allow replacing the labels array dynamically - either as an array or a csv string
             // If any labels are missing from the array then don't report/draw boxes later
             // If any colors are missing from the array then just use the default (magenta) later

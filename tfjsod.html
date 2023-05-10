@@ -38,6 +38,13 @@
                 <label for="node-input-annotationExpression"><i class="fa fa-picture-o"></i> Annotation</label>
                 <input type="text" id="node-input-annotationExpression">
             </div>
+            <div class="form-row" id="node-annotationBackground">
+                <label for="node-input-annotationBackground"><i class="fa fa-square"></i> Background</label>
+                <select type="text" id="node-input-annotationBackground" style="width:70%;">
+                    <option value="none">None</option>
+                    <option value="rect">Filled rectangle</option>
+                </select>
+            </div>
             <div class="form-row" id="node-bbox-padding">
                 <label for="node-input-bboxPadding"><i class="fa fa-window-close-o"></i> Padding</label>
                 <input type="number" id="node-input-bboxPadding" min="0">
@@ -57,7 +64,7 @@
         <div id="node-tfjsod-tab-filters">
             <div class="form-row">
                 <label for="node-input-minimumScore"><i class="fa fa-signal"></i> Min. score</label>
-                <input type="number" id="node-input-minimumScore" placeholder="e.g. 0 - 1" min="0" max="1" step="0.1">
+                <input type="number" id="node-input-minimumScore" placeholder="e.g. 0 - 1" min="0" max="1" step=".01">
             </div>
             <div class="form-row">
                 <label for="node-input-minimumWidth"><i class="fa fa-arrows-h"></i> Min. width</label>
@@ -77,11 +84,11 @@
             </div>
             <div class="form-row">
                 <label for="node-input-minimumAspectRatio"><i class="fa fa-arrows"></i> Min. aspect ratio</label>
-                <input type="number" id="node-input-minimumAspectRatio" min="0">
+                <input type="number" id="node-input-minimumAspectRatio" min="0" step=".01">
             </div>
             <div class="form-row">
                 <label for="node-input-maximumAspectRatio"><i class="fa fa-arrows"></i> Max. aspect ratio</label>
-                <input type="number" id="node-input-maximumAspectRatio" min="0">
+                <input type="number" id="node-input-maximumAspectRatio" min="0" step=".01">
             </div>
             <div class="form-row">
                 <label for="node-input-maximumDetections"><i class="fa fa-level-down "></i> Max. detections</label>
@@ -146,6 +153,7 @@
             inputFormat: { value: "jpg" },
             passthru: { value: "none" },
             annotationExpression: { value: "{{class}}({{scorePercentage}})" },
+            annotationBackground: { value: "none" },
             bboxPadding: { value: 0 },
             lineColor: { value: "#FF00FF" }, // Magenta
             outputFormat: { value: "jpg" }
@@ -302,7 +310,6 @@ debugger
                 types:['json']
             });
             //$("#node-input-classFilterType").typedInput('type', node.classFilterType);
-debugger;
             // Show tabsheets
             node.tabs = RED.tabs.create({
                 id: "node-tfjsod-tabs",

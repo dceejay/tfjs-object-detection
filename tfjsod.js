@@ -29,6 +29,7 @@ module.exports = function (RED) {
         this.inputFormat = config.inputFormat;
         this.passthru = config.passthru || "none";
         this.annotationExpression = config.annotationExpression;
+        this.annotationBackground = config.annotationBackground;
         this.bboxPadding = parseInt(config.bboxPadding || 0);
         this.outputFormat = config.outputFormat;
         this.lineColor = config.lineColor || "magenta";
@@ -611,7 +612,8 @@ module.exports = function (RED) {
                 // 6. Draw the bounding boxes on top of the original non-resized raw image
                 // ---------------------------------------------------------------------------------------------------------
 
-                if (node.passthru === "bbox") {
+                // Only execute the bbox drawing code when objects have been detected, to avoid converting images (rgb -> rgba -> rgb) when no bboxes will be drawn
+                if (node.passthru === "bbox" && msg.payload.length > 0) {
                     switch(inputImageDimensions.channels) {
                         case 3:
                             // When the image tensor contains RGB (i.e. 3 channels), a fourth alpha channel needs to be added.
@@ -639,6 +641,8 @@ module.exports = function (RED) {
                             // Add the alpha channel to the other channels, i.e. at the channel axis (= index of the channels in the shape array)
                             let rgbaImageTensor = tf.concat([imageTensor, alphaChannelTensor], axis);
                             imageTensor = rgbaImageTensor;
+
+                            msg.executionTimes.rgb_to_rgba = getDuration();
                             break;
                         case 4:
                             // Seems that we are already dealing with an rgbw tensor, so no conversion of the image tensor needed
@@ -669,18 +673,17 @@ module.exports = function (RED) {
                     // Create a new empty PureImage 2D canvas
                     let pimg = pureimage.make(inputImageDimensions.width, inputImageDimensions.height);
                     let ctx = pimg.getContext('2d');
+
+                    // Some stuff we draw on top of the image might need to be scaled, relative to the image size.
+                    // This way we can ensure that the stuff that we draw remains visible and proportional regardless of the image dimensions.
                     let scale = parseInt((inputImageDimensions.width + inputImageDimensions.height) / 500 + 0.5);
 
                     // Store the original non-resized raw image (which has been set aside already in the beginning) inside the PureImage 2D canvas
                     ctx.bitmap.data = new Uint8ClampedArray(rawImage);
 
-                    ctx.font = scale*8+"pt 'Source Sans Pro'";
-                    ctx.lineWidth = scale;
-                    ctx.lineJoin = 'bevel';
-                    ctx.textAlign = "center";
-                    
-                    // TODO determine the text height automatically (https://www.tutorialspoint.com/Measure-text-height-on-an-HTML5-canvas-element) -> measure performance impact first!!
-                    let textHeight = 15;
+                    let textHeight = scale * 8;
+   
+                    ctx.lineJoin = 'bevel'; // TODO why is this needed?
 
                     // Draw all the bounding boxes in the PureImage 2D canvas
                     msg.payload.forEach(function (detectedObject, index) {
@@ -695,15 +698,23 @@ module.exports = function (RED) {
                             bboxColor = node.lineColor;
                         }
 
-                        ctx.fillStyle = bboxColor;
-                        ctx.strokeStyle = bboxColor;
-                        
+                        let x1 = detectedObject.bbox[0];
+                        let y1 = detectedObject.bbox[1];
+                        let width = detectedObject.bbox[2];
+                        let height = detectedObject.bbox[3];
+
+                        // Calculate the padding on all size, because there might not be enough room for the specified fixed padding
+                        let paddingLeft = Math.min(node.bboxPadding, x1);
+                        let paddingTop = Math.min(node.bboxPadding, y1);
+                        let paddingRight = Math.min(node.bboxPadding, inputImageDimensions.width - x1 - width);
+                        let paddingBottom = Math.min(node.bboxPadding, inputImageDimensions.height - y1 - height);
+
                         // Correct the coordinates of the bbox upper left (x1,y1) and lower right (x2,y2), to take into account the specified padding
-                        let x1 = detectedObject.bbox[0] - node.bboxPadding;
-                        let y1 = detectedObject.bbox[1] - node.bboxPadding;
-                        let width = detectedObject.bbox[2] + 2 * node.bboxPadding;
-                        let height = detectedObject.bbox[3] + 2 * node.bboxPadding;
-                        
+                        x1 = detectedObject.bbox[0] - paddingLeft;
+                        y1 = detectedObject.bbox[1] - paddingTop;
+                        width = detectedObject.bbox[2] + paddingLeft + paddingRight;
+                        height = detectedObject.bbox[3] + paddingTop + paddingBottom;
+
                         // The padding can result in a bbox partly outside the image dimensions, so force it to be within the image (via min and max).
                         x1 = Math.max(0, x1);
                         y1 = Math.max(0, y1);
@@ -725,17 +736,61 @@ module.exports = function (RED) {
                             // TODO check where the escaping (i.e. the second slash) is coming from
                             let texts = annotationExpression.split('\\n');
 
+                            // Calculate the maximum width of all available text lines (and at least as wide as the bounding box.
+                            // However the text can be wider than the bounding box.
+                            let totalTextWidth = width;
+                            texts.forEach(function (text, index) {
+                                let textWidth = ctx.measureText(text).width;
+                                totalTextWidth = Math.max(textWidth, totalTextWidth);
+                            })
+
+                            // In case of multiline annotation text, the text height depends on the number of text lines
+                            let totalTextHeight = textHeight * texts.length;
+ 
+                            // Calculate the rectangle (i.e. bbox) of the annotation label
+                            let rect_x = x1 + width/2 - totalTextWidth/2;
+                            let rect_y;
+                            if (y1 >= totalTextHeight) {
+                                // By default the annotation text is displayed above the bounding box.
+                                rect_y = y1 - totalTextHeight;
+                            }
+                            else {
+                                // When there is not enough space below the bounding box, then show the text above the bounding box
+                                rect_y = y1 + height;
+                            }
+
+                            // Draw a filled rectangle below the text (if required)
+                            if (node.annotationBackground == "rect") {
+                                ctx.fillStyle = bboxColor;
+                                ctx.fillRect(rect_x, rect_y, totalTextWidth, totalTextHeight);
+                            }
+
                             // Draw the texts above the bounding box
-                            texts.reverse().forEach(function (text, index) {
+                            texts.forEach(function (text, index) {
+                                // The text should be centered horizontall (i.e. in the middle of the bounding box)
                                 let text_x = x1 + width/2;
-                                let text_y = y1 - 4 - textHeight*index;
+                                let text_y = rect_y - 4 + textHeight*index;
+
+                                // The annotation text should be white if there is a filled rectangle below it
+                                if (node.annotationBackground == "rect") {
+                                    ctx.fillStyle = "white";
+                                }
+                                else {
+                                    ctx.fillStyle = bboxColor;
+                                }
+
+                                // Draw the text filled with the same color as the bbox outline
+                                ctx.font = textHeight + "pt 'Source Sans Pro'";
+                                ctx.textAlign = "center";
+                                ctx.textBaseline = "top";
                                 ctx.fillText(text, text_x, text_y);
                             })
                         }
 
                         // Draw the bounding box (corrected with padding)
-                        ctx.rect(x1, y1, width, height);
-                        ctx.stroke();
+                        ctx.strokeStyle = bboxColor;
+                        ctx.lineWidth = scale;
+                        ctx.strokeRect(x1, y1, width, height);
                     });
 
                     // Convert the annotated image (from the PureImage canvas) - containing the bounding boxex - to a tensor
@@ -774,6 +829,9 @@ module.exports = function (RED) {
                                 let rgbImageTensor = tf.concat([channel_r, channel_g, channel_b], 2);
                                  tf.dispose([channel_r, channel_g,channel_b, channel_a]); // TODO remove this??
                                 imageTensor = rgbImageTensor;
+
+                                msg.executionTimes.rgba_to_rgb = getDuration();
+
                                 break;
                             default:
                                 throw new Error("The provided shape is not representing a rgb(w) image (because it has not 3 or 4 channels)");
@@ -787,6 +845,8 @@ module.exports = function (RED) {
                             data: Buffer.from(jpegData),
                             type: "jpg"
                         }
+
+                        msg.executionTimes.encoding = getDuration();
                     }
                     else {
                         // TODO test whether we should use dataSync i.e. a clone of the data before sending it to the next nodes in the flow
@@ -803,8 +863,6 @@ module.exports = function (RED) {
                 msg.image.width = inputImageDimensions.width;
                 msg.image.height = inputImageDimensions.height;
                 msg.image.channels = inputImageDimensions.channels;
-
-                msg.executionTimes.encoding = getDuration();
 
                 // ---------------------------------------------------------------------------------------------------------
                 // 8. Statistics
@@ -851,6 +909,7 @@ module.exports = function (RED) {
             }
             catch (error) {
                 node.error(error, msg);
+                console.log(error); // Print stacktrace
             }
 
             // Mark all variables - created within the current execution context - for disposal, so that Tensorflow.js can decrement their reference
@@ -910,8 +969,6 @@ module.exports = function (RED) {
 
             // Immediately set the node as busy before the async function is called, to avoid that multiple async functions are started in parallel
             node.busy = true;
-            
-            console.log("calling handleMsg - setted busy = " + node.busy);
 
             // The idle time is the time since the end of the previous message processing.
             msg.idleTime = getDuration();
